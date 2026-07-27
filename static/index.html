@@ -20,6 +20,10 @@
         </div>
       </div>
       <div class="header-badges">
+        <button class="sidebar-toggle-btn" id="btn-toggle-sidebar" title="Toggle Control Panel">
+          <span class="toggle-icon">◀</span>
+          <span class="toggle-label">Hide Controls</span>
+        </button>
         <div class="device-pill" id="device-info">ONNX Runtime / CPU</div>
         <div class="status-pill">
           <div class="status-dot"></div>
@@ -122,6 +126,12 @@
 
       <!-- Central Workspace -->
       <section class="workspace">
+        <!-- Floating Edge Toggle Handle (visible when sidebar is collapsed) -->
+        <button class="sidebar-floating-toggle" id="btn-floating-toggle" title="Show Control Panel">
+          <span class="floating-icon">▶</span>
+          <span>Show Controls</span>
+        </button>
+
         <!-- KPI Analytics Cards -->
         <div class="kpi-grid">
           <div class="kpi-card">

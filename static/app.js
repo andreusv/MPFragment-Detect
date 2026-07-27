@@ -80,6 +80,25 @@ function initUI() {
   btnExportCsv.addEventListener('click', exportCsv);
   btnExportJson.addEventListener('click', exportJson);
   if (btnExportCsvTable) btnExportCsvTable.addEventListener('click', exportCsv);
+
+  // Sidebar Sliding Toggle
+  const btnToggleSidebar = document.getElementById('btn-toggle-sidebar');
+  const btnFloatingToggle = document.getElementById('btn-floating-toggle');
+  const sidebar = document.querySelector('.sidebar');
+
+  function toggleSidebar() {
+    if (!sidebar) return;
+    const isCollapsed = sidebar.classList.toggle('collapsed');
+    if (btnToggleSidebar) {
+      const icon = btnToggleSidebar.querySelector('.toggle-icon');
+      const label = btnToggleSidebar.querySelector('.toggle-label');
+      if (icon) icon.textContent = isCollapsed ? '▶' : '◀';
+      if (label) label.textContent = isCollapsed ? 'Show Controls' : 'Hide Controls';
+    }
+  }
+
+  if (btnToggleSidebar) btnToggleSidebar.addEventListener('click', toggleSidebar);
+  if (btnFloatingToggle) btnFloatingToggle.addEventListener('click', toggleSidebar);
 }
 
 function updateBadges() {
