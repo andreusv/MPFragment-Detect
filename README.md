@@ -13,7 +13,7 @@
 
 - **Deep Learning Instance Segmentation**: Powered by an optimized Mask R-CNN model executed via ONNX Runtime for high throughput and cross-platform compatibility.
 - **High-Resolution Sliced Inference (SAHI)**: Processes large high-res microscope slides using overlapping sliding windows ($1024 \times 1024$ tiles with configurable overlap) to accurately detect sub-millimeter particles without downscaling degradation.
-- **Weighted Boxes Fusion (WBF)**: Post-processing pipeline using WBF to seamlessly merge overlapping tiled bounding boxes and binary segmentation masks.
+- **Instance-Aware Weighted Boxes & Mask Fusion**: Memory-efficient clustering pipeline (`cluster_detections`) that merges overlapping tile detections and fuses binary segmentation masks directly per instance using score-weighted ROI coverage maps.
 - **HSV Particle Color Classification**: Automated color characterization (`ColorClassifier`) that classifies each detected microplastic fragment into standard polymer color categories (*Transparent/White, Black/Dark, Red, Blue, Green, Yellow, Orange, Purple*) along with RGB and Hex values.
 - **Batch Image Processing & Scan Carousel**: Load and analyze single or multiple microscope slides simultaneously in batch mode, complete with an interactive scan carousel selector in the GUI.
 - **Morphological Profiling & Quantitative Analysis**:

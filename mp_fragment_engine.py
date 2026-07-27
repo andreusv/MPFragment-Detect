@@ -7,7 +7,49 @@ import cv2
 from PIL import Image
 import onnxruntime as ort
 from skimage.measure import regionprops, label as label_np
-from ensemble_boxes import weighted_boxes_fusion
+
+
+def _box_iou(a, b):
+    xa1, ya1 = max(a[0], b[0]), max(a[1], b[1])
+    xa2, ya2 = min(a[2], b[2]), min(a[3], b[3])
+    inter = max(0.0, xa2 - xa1) * max(0.0, ya2 - ya1)
+    area_a = max(0.0, a[2] - a[0]) * max(0.0, a[3] - a[1])
+    area_b = max(0.0, b[2] - b[0]) * max(0.0, b[3] - b[1])
+    union = area_a + area_b - inter
+    return inter / union if union > 0 else 0.0
+
+
+def cluster_detections(boxes, scores, labels, iou_thr):
+    """
+    WBF-style greedy IoU clustering that keeps track of which raw detection
+    indices end up in each cluster, so masks can be fused consistently with
+    the boxes instead of being reattached afterwards by a separate heuristic.
+    Returns a list of dicts: {label, box (running weighted avg), indices, scores}.
+    """
+    order = np.argsort(-scores)
+    clusters = []
+    for idx in order:
+        box, label, score = boxes[idx], labels[idx], scores[idx]
+        best_iou, best_c = 0.0, None
+        for c in clusters:
+            if c["label"] != label:
+                continue
+            iou = _box_iou(box, c["box"])
+            if iou > best_iou:
+                best_iou, best_c = iou, c
+        if best_iou >= iou_thr:
+            w_old = best_c["score_sum"]
+            w_new = w_old + score
+            best_c["box"] = (best_c["box"] * w_old + box * score) / w_new
+            best_c["score_sum"] = w_new
+            best_c["indices"].append(idx)
+            best_c["scores"].append(score)
+        else:
+            clusters.append({
+                "label": label, "box": box.copy(),
+                "indices": [idx], "score_sum": score, "scores": [score],
+            })
+    return clusters
 
 class ScaleBarDetector:
     """
@@ -123,7 +165,7 @@ class MPFragmentEngine:
         box_score_thresh=0.6,
         wbf_iou_thresh=0.4,
         tile_size=1024,
-        overlap_pct=0.2,
+        overlap_pct=0.3,
         mask_threshold=0.5,
         providers=None
     ):
@@ -249,74 +291,81 @@ class MPFragmentEngine:
 
             if m is not None:
                 for idx in range(len(b)):
-                    full_mask = np.zeros((h_orig, w_orig), dtype=np.float32)
                     mask_crop = m[idx, 0, :patch_h, :patch_w]
-                    full_mask[y1:y1+patch_h, x1:x1+patch_w] = mask_crop
-                    tile_masks.append(full_mask)
+                    tile_masks.append((mask_crop, x1, y1))
 
         if len(tile_boxes) > 0:
-            c_boxes = np.vstack(tile_boxes)
-            c_scores = np.concatenate(tile_scores)
+            c_boxes = np.vstack(tile_boxes).astype(np.float32)
+            c_scores = np.concatenate(tile_scores).astype(np.float32)
             c_labels = np.concatenate(tile_labels)
 
-            boxes_norm = c_boxes.astype(np.float32).copy()
-            boxes_norm[:, [0, 2]] /= w_orig
-            boxes_norm[:, [1, 3]] /= h_orig
-            boxes_norm = np.clip(boxes_norm, 0.0, 1.0)
+            # Instance-aware fusion: cluster raw per-tile detections by box IoU
+            # (same criterion WBF uses), but keep the member indices so masks
+            # can be fused from exactly the detections that were merged into
+            # each instance -- not reattached afterwards by a global heuristic.
+            clusters = cluster_detections(c_boxes, c_scores, c_labels, self.wbf_iou_thresh)
 
-            f_boxes, f_scores, f_labels = weighted_boxes_fusion(
-                [boxes_norm.tolist()],
-                [c_scores.tolist()],
-                [c_labels.tolist()],
-                weights=None,
-                iou_thr=self.wbf_iou_thresh,
-                skip_box_thr=self.box_score_thresh
-            )
+            f_boxes_list, f_scores_list, f_labels_list, fused_masks_list = [], [], [], []
 
-            f_boxes = np.array(f_boxes, dtype=np.float32)
-            if len(f_boxes) > 0:
-                f_boxes[:, [0, 2]] *= w_orig
-                f_boxes[:, [1, 3]] *= h_orig
-                f_scores = np.array(f_scores, dtype=np.float32)
-                f_labels = np.array(f_labels, dtype=np.int64)
-            else:
-                f_boxes = np.empty((0, 4), dtype=np.float32)
-                f_scores = np.empty((0,), dtype=np.float32)
-                f_labels = np.empty((0,), dtype=np.int64)
+            for c in clusters:
+                member_idx = c["indices"]
+                member_scores = np.array(c["scores"], dtype=np.float32)
+
+                if len(tile_masks) > 0:
+                    member_items = [tile_masks[i] for i in member_idx]
+
+                    rx1 = min(item[1] for item in member_items)
+                    ry1 = min(item[2] for item in member_items)
+                    rx2 = max(item[1] + item[0].shape[1] for item in member_items)
+                    ry2 = max(item[2] + item[0].shape[0] for item in member_items)
+
+                    roi_w, roi_h = rx2 - rx1, ry2 - ry1
+                    prob_roi = np.zeros((roi_h, roi_w), dtype=np.float32)
+                    weight_roi = np.zeros((roi_h, roi_w), dtype=np.float32)
+
+                    for (crop, x_off, y_off), score in zip(member_items, member_scores):
+                        ch, cw = crop.shape
+                        dx, dy = x_off - rx1, y_off - ry1
+                        prob_roi[dy:dy+ch, dx:dx+cw] += crop * score
+                        # per-pixel coverage weight -- only sum scores of members
+                        # that actually predicted something at this pixel, not
+                        # the full cluster score sum (which double-penalizes
+                        # pixels only covered by one of several members)
+                        weight_roi[dy:dy+ch, dx:dx+cw] += score
+
+                    prob_roi = prob_roi / np.maximum(weight_roi, 1e-6)
+                    bin_mask_roi = prob_roi >= self.mask_threshold
+
+                    bin_mask = np.zeros((h_orig, w_orig), dtype=bool)
+                    bin_mask[ry1:ry2, rx1:rx2] = bin_mask_roi
+                else:
+                    bin_mask = np.zeros((h_orig, w_orig), dtype=bool)
+
+                if bin_mask.any():
+                    ys, xs = np.where(bin_mask)
+                    fx1, fy1 = float(xs.min()), float(ys.min())
+                    fx2, fy2 = float(xs.max() + 1), float(ys.max() + 1)
+                else:
+                    # No mask survived threshold (e.g. masks head absent) -
+                    # fall back to the score-weighted box from clustering.
+                    fx1, fy1, fx2, fy2 = c["box"]
+                    x1, y1 = max(0, int(fx1)), max(0, int(fy1))
+                    x2, y2 = min(w_orig, int(fx2)), min(h_orig, int(fy2))
+                    bin_mask[y1:y2, x1:x2] = True
+
+                f_boxes_list.append([fx1, fy1, fx2, fy2])
+                f_scores_list.append(float(member_scores.mean()))
+                f_labels_list.append(c["label"])
+                fused_masks_list.append(bin_mask)
+
+            f_boxes = np.array(f_boxes_list, dtype=np.float32) if f_boxes_list else np.empty((0, 4), dtype=np.float32)
+            f_scores = np.array(f_scores_list, dtype=np.float32) if f_scores_list else np.empty((0,), dtype=np.float32)
+            f_labels = np.array(f_labels_list, dtype=np.int64) if f_labels_list else np.empty((0,), dtype=np.int64)
+            fused_masks = np.stack(fused_masks_list, axis=0) if fused_masks_list else np.empty((0, h_orig, w_orig), dtype=bool)
         else:
             f_boxes = np.empty((0, 4), dtype=np.float32)
             f_scores = np.empty((0,), dtype=np.float32)
             f_labels = np.empty((0,), dtype=np.int64)
-
-        fused_masks = []
-        for idx in range(len(f_boxes)):
-            box = f_boxes[idx]
-            x1, y1, x2, y2 = map(int, box)
-            x1, y1 = max(0, x1), max(0, y1)
-            x2, y2 = min(w_orig, x2), min(h_orig, y2)
-
-            mask = np.zeros((h_orig, w_orig), dtype=bool)
-            if len(tile_masks) > 0 and x2 > x1 and y2 > y1:
-                box_mask_prob = np.zeros((y2 - y1, x2 - x1), dtype=np.float32)
-                count = 0
-                for tm in tile_masks:
-                    crop = tm[y1:y2, x1:x2]
-                    if np.max(crop) > self.mask_threshold:
-                        box_mask_prob += crop
-                        count += 1
-                if count > 0:
-                    box_mask_prob /= count
-                    mask[y1:y2, x1:x2] = box_mask_prob >= self.mask_threshold
-                else:
-                    mask[y1:y2, x1:x2] = True
-            elif x2 > x1 and y2 > y1:
-                mask[y1:y2, x1:x2] = True
-
-            fused_masks.append(mask)
-
-        if len(fused_masks) > 0:
-            fused_masks = np.stack(fused_masks, axis=0)
-        else:
             fused_masks = np.empty((0, h_orig, w_orig), dtype=bool)
 
         # Analyze morphological fragment measurements + Color Characterization
