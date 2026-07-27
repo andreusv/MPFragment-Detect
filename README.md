@@ -5,7 +5,7 @@
 [![Desktop UI](https://img.shields.io/badge/GUI-PyWebView-orange.svg)](https://pywebview.flowrl.com/)
 [![Inference Engine](https://img.shields.io/badge/Inference-ONNX%20Runtime-blue.svg)](https://onnxruntime.ai/)
 
-**MPFragDetect** (MPFragment Studio) is an end-to-end computer vision software and inference engine designed for automated detection, segmentation, quantification, and morphological profiling of microplastic fragments from high-resolution optical microscope and scanner images.
+**MPFragDetect** (MPFragment Studio) is an end-to-end computer vision software and inference engine designed for automated detection, segmentation, quantification, color classification, and morphological profiling of microplastic fragments from high-resolution optical microscope and scanner images.
 
 ---
 
@@ -14,11 +14,13 @@
 - **Deep Learning Instance Segmentation**: Powered by an optimized Mask R-CNN model executed via ONNX Runtime for high throughput and cross-platform compatibility.
 - **High-Resolution Sliced Inference (SAHI)**: Processes large high-res microscope slides using overlapping sliding windows ($1024 \times 1024$ tiles with configurable overlap) to accurately detect sub-millimeter particles without downscaling degradation.
 - **Weighted Boxes Fusion (WBF)**: Post-processing pipeline using WBF to seamlessly merge overlapping tiled bounding boxes and binary segmentation masks.
+- **HSV Particle Color Classification**: Automated color characterization (`ColorClassifier`) that classifies each detected microplastic fragment into standard polymer color categories (*Transparent/White, Black/Dark, Red, Blue, Green, Yellow, Orange, Purple*) along with RGB and Hex values.
+- **Batch Image Processing & Scan Carousel**: Load and analyze single or multiple microscope slides simultaneously in batch mode, complete with an interactive scan carousel selector in the GUI.
 - **Morphological Profiling & Quantitative Analysis**:
-  - **Metrics Computed**: Surface Area ($\mu m^2$), Perimeter ($\mu m$), Feret Diameter ($\mu m$), Aspect Ratio, and Circularity Index.
-  - **Size Classification**: Automatically bins detected particles into microplastic size tiers (Micro, Meso, Macro).
-- **Automatic Scale Bar Detection**: Built-in computer vision module (`ScaleBarDetector`) that scans corners for microscope scale bar markings to auto-calibrate the pixel-to-micrometer ratio.
-- **Modern Desktop GUI**: Built using PyWebView and a responsive web dashboard (FastAPI backend + Vanilla JS/CSS frontend) offering visualization overlays, interactive data tables, and CSV exports.
+  - **Metrics Computed**: Surface Area ($\mu m^2$), Perimeter ($\mu m$), Equivalent Circular Diameter ($\mu m$), Feret Maximum Diameter ($\mu m$), Aspect Ratio, Circularity Index, and Solidity.
+  - **Size Binning**: Automatically classifies detected particles into microplastic size tiers (Micro, Meso, Macro).
+- **Automatic Scale Bar Detection**: Built-in computer vision module (`ScaleBarDetector`) that scans image corners for microscope scale bar markings to auto-calibrate the pixel-to-micrometer ratio.
+- **Modern Desktop GUI**: Built using PyWebView and a responsive web dashboard (FastAPI backend + Vanilla JS/CSS frontend) offering visualization overlays, interactive data tables with color dot badges, and CSV/JSON exports.
 - **Standalone Packaging**: Includes PyInstaller build automation (`build_app.py`) to create standalone executable packages (`.app` on macOS / `.exe` on Windows).
 - **Benchmarking & Optimization Tools**: Includes evaluation scripts (`onnx_inference.py` and `WBF_EVO.py`) for COCO metric calculation, confusion matrix analysis, and WBF threshold tuning.
 
@@ -29,12 +31,13 @@
 ```
 MPFragDetect/
 ├── app.py                            # GUI Application Entry Point (FastAPI + PyWebView)
-├── mp_fragment_engine.py              # Core Engine (Sliced Inference, WBF, Morphology & Scale Calibration)
+├── mp_fragment_engine.py              # Core Engine (Sliced Inference, WBF, Color Classifier & Scale Calibration)
 ├── build_app.py                       # PyInstaller executable builder script
 ├── MPFragment.spec                    # PyInstaller build spec file
 ├── onnx_inference.py                  # Standalone model evaluation & COCO metrics pipeline
 ├── WBF_EVO.py                         # Hyperparameter tuning script for WBF thresholds
 ├── fragment-Config.yaml               # Model & dataset configuration file
+├── requirements.txt                   # Dependency requirements file
 ├── final_maskrcnn_fragments_model.onnx# Trained Mask R-CNN ONNX model weights (176 MB)
 ├── static/                            # Frontend UI assets (HTML5, CSS3, JS)
 │   ├── index.html
@@ -60,8 +63,8 @@ MPFragDetect/
 Clone the repository and install the dependencies:
 
 ```bash
-git clone https://github.com/your-username/MPFragDetect.git
-cd MPFragDetect
+git clone https://github.com/andreusv/MPFragmentApp.git
+cd MPFragmentApp
 
 # Create virtual environment
 python -m venv venv
@@ -70,8 +73,6 @@ source venv/bin/activate  # On Windows: venv\Scripts\activate
 # Install required Python packages
 pip install -r requirements.txt
 ```
-
-*(Note: Create a `requirements.txt` file containing dependencies such as `fastapi`, `uvicorn`, `pywebview`, `onnxruntime`, `opencv-python`, `scikit-image`, `ensemble-boxes`, `torch`, `torchvision`, `pillow`, `tqdm`, `pyyaml`, `requests`)*
 
 ### 2. Model Weights (`final_maskrcnn_fragments_model.onnx`)
 
@@ -125,12 +126,14 @@ python WBF_EVO.py --config fragment-Config.yaml
 
 ---
 
-## 🔬 Morphological Analysis Details
+## 🔬 Morphological & Color Analysis Details
 
-The morphometrics pipeline in [mp_fragment_engine.py](file:///Users/andreusimovidal/Desktop/MPFragDetect/mp_fragment_engine.py) extracts key physical descriptors for microplastic research:
+The analysis engine in [mp_fragment_engine.py](file:///Users/andreusimovidal/Desktop/MPFragDetect/mp_fragment_engine.py) extracts key physical and visual descriptors for microplastics research:
 
-- **Area ($\mu m^2$)**: Calculated from pixel mask count scaled by the pixel-to-$\mu m$ factor.
+- **Particle Color Class**: Extracted using HSV histogram sampling inside the segmented particle mask.
+- **Area ($\mu m^2$)**: Calculated from pixel mask count scaled by the pixel-to-$\mu m$ calibration factor.
 - **Perimeter ($\mu m$)**: Extracted using mask contour perimeter algorithms.
+- **Equivalent Circular Diameter ($\mu m$)**: Diameter of a circle with equivalent surface area.
 - **Feret Maximum Diameter ($\mu m$)**: Maximum caliper length of the binary mask particle projection.
 - **Aspect Ratio**: Ratio of major axis length to minor axis length ($AR = \frac{\text{Major Axis}}{\text{Minor Axis}}$).
 - **Circularity**: Shape compactness descriptor defined as $4\pi \times \frac{\text{Area}}{\text{Perimeter}^2}$.
