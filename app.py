@@ -7,15 +7,16 @@ import cv2
 import uvicorn
 import webview
 import requests
+from typing import List
 from threading import Thread
+from collections import Counter
 from fastapi import FastAPI, File, UploadFile, Form
 from fastapi.staticfiles import StaticFiles
-from fastapi.responses import HTMLResponse, JSONResponse, FileResponse
+from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 
 from mp_fragment_engine import MPFragmentEngine
 
-# Initialize FastAPI application
 app = FastAPI(title="MPFragment Studio Backend")
 
 app.add_middleware(
@@ -78,15 +79,16 @@ async def api_predict(
         else:
             return JSONResponse({"error": "No image file provided"}, status_code=400)
 
-        # Run ONNX inference
         pred_dict = current_engine.predict_image(img_input, pixel_to_um=pixel_to_um)
+        if file and file.filename:
+            pred_dict["image_name"] = file.filename
 
-        # Render visualization overlay
         vis_image = current_engine.render_visualization(pred_dict)
         _, buffer = cv2.imencode(".jpg", vis_image, [cv2.IMWRITE_JPEG_QUALITY, 90])
         vis_b64 = base64.b64encode(buffer).decode("utf-8")
 
         return {
+            "image_name": pred_dict.get("image_name", "image.jpg"),
             "fragments": pred_dict["fragments"],
             "pixel_to_um": pred_dict["pixel_to_um"],
             "scalebar_detected": pred_dict["scalebar_detected"],
@@ -97,7 +99,69 @@ async def api_predict(
         traceback.print_exc()
         return JSONResponse({"error": str(e)}, status_code=500)
 
-# Serve static files (HTML, CSS, JS) at root URL
+@app.post("/api/predict_batch")
+async def api_predict_batch(
+    files: List[UploadFile] = File(...),
+    box_score_thresh: float = Form(0.6),
+    wbf_iou_thresh: float = Form(0.4),
+    tile_size: int = Form(1024),
+    pixel_to_um: float = Form(None)
+):
+    try:
+        current_engine = get_engine(
+            box_score_thresh=box_score_thresh,
+            wbf_iou_thresh=wbf_iou_thresh,
+            tile_size=tile_size
+        )
+
+        batch_results = []
+        all_fragments = []
+        color_counts = Counter()
+
+        for file in files:
+            contents = await file.read()
+            if len(contents) == 0:
+                continue
+            nparr = cv2.imdecode(np.frombuffer(contents, np.uint8), cv2.IMREAD_COLOR)
+            if nparr is None:
+                continue
+
+            pred_dict = current_engine.predict_image(nparr, pixel_to_um=pixel_to_um)
+            pred_dict["image_name"] = file.filename
+
+            vis_image = current_engine.render_visualization(pred_dict)
+            _, buffer = cv2.imencode(".jpg", vis_image, [cv2.IMWRITE_JPEG_QUALITY, 85])
+            vis_b64 = base64.b64encode(buffer).decode("utf-8")
+
+            # Collect color statistics
+            for f in pred_dict["fragments"]:
+                color_counts[f.get("color_name", "Unknown")] += 1
+                all_fragments.append(f)
+
+            batch_results.append({
+                "image_name": file.filename,
+                "fragments": pred_dict["fragments"],
+                "pixel_to_um": pred_dict["pixel_to_um"],
+                "scalebar_detected": pred_dict["scalebar_detected"],
+                "visualization_base64": vis_b64
+            })
+
+        total_area = sum(f.get("area_um2", f.get("area_px", 0)) for f in all_fragments)
+
+        return {
+            "batch_summary": {
+                "total_images": len(batch_results),
+                "total_fragments": len(all_fragments),
+                "total_area": round(total_area, 2),
+                "color_distribution": dict(color_counts)
+            },
+            "results": batch_results
+        }
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        return JSONResponse({"error": str(e)}, status_code=500)
+
 app.mount("/", StaticFiles(directory=STATIC_DIR, html=True), name="static_root")
 
 def start_server():
@@ -124,11 +188,9 @@ class PyWebViewApi:
         return None
 
 def main():
-    # Start FastAPI server thread
     server_thread = Thread(target=start_server, daemon=True)
     server_thread.start()
 
-    # Ensure server is listening before opening GUI window
     print("[MPFragment Studio] Waiting for backend server startup...")
     if not wait_for_server():
         print("[MPFragment Studio] Error: Backend server failed to start.")
@@ -137,12 +199,11 @@ def main():
 
     api = PyWebViewApi()
 
-    # Launch PyWebView desktop window
     webview.create_window(
-        title="MPFragment Studio - Microplastics Detection & Analysis",
+        title="MPFragment Studio - Microplastics Detection & Color Analysis",
         url="http://127.0.0.1:8000",
-        width=1380,
-        height=900,
+        width=1400,
+        height=920,
         resizable=True,
         js_api=api
     )

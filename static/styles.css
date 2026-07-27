@@ -448,6 +448,80 @@ input[type="range"]::-webkit-slider-thumb:hover {
   color: var(--primary-cyan);
 }
 
+/* Batch Carousel Bar */
+.batch-carousel {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 8px 24px;
+  background: rgba(15, 23, 42, 0.7);
+  border-bottom: 1px solid var(--panel-border);
+}
+
+.carousel-title {
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: var(--text-muted);
+
+}
+
+.carousel-items {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  overflow-x: auto;
+  padding-bottom: 2px;
+}
+
+.carousel-items::-webkit-scrollbar {
+  height: 4px;
+}
+.carousel-items::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.1);
+  border-radius: 10px;
+}
+
+.carousel-item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid var(--panel-border);
+  padding: 4px 12px;
+  border-radius: 20px;
+  font-size: 0.78rem;
+  color: var(--text-muted);
+  cursor: pointer;
+  transition: var(--transition-fast);
+  white-space: nowrap;
+}
+
+.carousel-item:hover, .carousel-item.active {
+  background: rgba(6, 182, 212, 0.15);
+  border-color: var(--primary-cyan);
+  color: var(--text-main);
+}
+
+/* Color Badge in Table */
+.color-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid var(--panel-border);
+  padding: 3px 8px;
+  border-radius: 12px;
+  font-size: 0.76rem;
+}
+
+.color-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  display: inline-block;
+  box-shadow: 0 0 4px rgba(0,0,0,0.5);
+}
+
 /* Viewport Area */
 .viewport-area {
   flex: 1;
@@ -458,36 +532,6 @@ input[type="range"]::-webkit-slider-thumb:hover {
   align-items: center;
   justify-content: center;
   padding: 16px;
-}
-
-.viewport-toolbar {
-  position: absolute;
-  top: 24px;
-  right: 24px;
-  display: flex;
-  gap: 8px;
-  background: rgba(17, 24, 39, 0.9);
-  backdrop-filter: blur(12px);
-  border: 1px solid var(--panel-border);
-  border-radius: 30px;
-  padding: 4px 8px;
-  z-index: 10;
-}
-
-.tool-btn {
-  background: transparent;
-  border: none;
-  color: var(--text-muted);
-  padding: 6px 12px;
-  font-size: 0.8rem;
-  border-radius: 20px;
-  cursor: pointer;
-  transition: var(--transition-fast);
-}
-
-.tool-btn:hover, .tool-btn.active {
-  color: var(--text-main);
-  background: rgba(255, 255, 255, 0.1);
 }
 
 .canvas-wrapper {
@@ -501,7 +545,7 @@ input[type="range"]::-webkit-slider-thumb:hover {
 
 .preview-image {
   max-width: 100%;
-  max-height: calc(100vh - 380px);
+  max-height: calc(100vh - 410px);
   border-radius: var(--radius-lg);
   border: 1px solid var(--panel-border);
   box-shadow: var(--shadow-main);

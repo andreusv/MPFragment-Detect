@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>MPFragment Studio - Microplastics Morphological Analysis</title>
+  <title>MPFragment Studio - Microplastics Detection & Color Characterization</title>
   <link rel="stylesheet" href="styles.css">
 </head>
 <body>
@@ -16,7 +16,7 @@
         </div>
         <div class="brand-title">
           <h1>MPFragment Studio</h1>
-          <p>Microplastics Mask R-CNN Detection & Quantification</p>
+          <p>Microplastics Detection, Quantification & Color Characterization</p>
         </div>
       </div>
       <div class="header-badges">
@@ -35,17 +35,17 @@
         <!-- Step 1: Input Selection Card -->
         <div class="card">
           <div class="card-title">
-            <span>🔬 1. Image Input</span>
+            <span>🔬 1. Image Input (Single or Batch)</span>
           </div>
 
-          <!-- Hidden Native File Input -->
-          <input type="file" id="file-input" accept="image/*" style="display: none;">
+          <!-- Hidden Native File Input (multiple enabled) -->
+          <input type="file" id="file-input" accept="image/*" multiple style="display: none;">
 
           <!-- Interactive Drag & Drop Area -->
           <div class="dropzone" id="dropzone">
             <span class="dropzone-icon">📷</span>
-            <p><strong>Click to Select Scan</strong></p>
-            <p style="font-size: 0.75rem;">or drag & drop image here</p>
+            <p><strong>Click to Select Images</strong></p>
+            <p style="font-size: 0.75rem;">Select 1 or multiple microscope scans</p>
           </div>
 
           <!-- Active File Info Box -->
@@ -53,19 +53,19 @@
             <img id="thumb-preview" class="thumb-preview" alt="Thumbnail">
             <div class="image-meta">
               <span class="image-name" id="info-filename">image.jpg</span>
-              <span class="image-dims" id="info-dims">3840 x 2160 px</span>
+              <span class="image-dims" id="info-dims">1 file selected</span>
             </div>
           </div>
 
           <button class="btn btn-secondary" id="btn-browse-file">
-            📁 Browse File
+            📁 Browse Images (Multi)
           </button>
         </div>
 
         <!-- Step 2: Detection Settings Card -->
         <div class="card">
           <div class="card-title">
-            <span>⚙️ 2. Detection Parameters</span>
+            <span>⚙️ 2. Detection & Color Settings</span>
           </div>
 
           <div class="control-item">
@@ -103,7 +103,7 @@
 
         <!-- Step 3: Action Execution Button -->
         <button class="btn btn-primary" id="btn-run-inference">
-          ⚡ Run Particle Detection
+          ⚡ Run Particle & Color Detection
         </button>
 
         <!-- Step 4: Export Card -->
@@ -127,7 +127,7 @@
           <div class="kpi-card">
             <div class="kpi-icon">🧪</div>
             <div class="kpi-content">
-              <span class="kpi-label">Detected Fragments</span>
+              <span class="kpi-label">Total Fragments</span>
               <span class="kpi-value" id="kpi-count">0</span>
             </div>
           </div>
@@ -141,10 +141,10 @@
           </div>
 
           <div class="kpi-card">
-            <div class="kpi-icon">📏</div>
+            <div class="kpi-icon">🎨</div>
             <div class="kpi-content">
-              <span class="kpi-label">Mean Eq. Diameter</span>
-              <span class="kpi-value" id="kpi-diameter">0.0 μm</span>
+              <span class="kpi-label">Dominant Color</span>
+              <span class="kpi-value" id="kpi-color">-</span>
             </div>
           </div>
 
@@ -157,15 +157,21 @@
           </div>
         </div>
 
+        <!-- Batch Image Carousel Selector (Shown when multiple images are processed) -->
+        <div class="batch-carousel" id="batch-carousel" style="display: none;">
+          <span class="carousel-title">Batch Scans:</span>
+          <div class="carousel-items" id="carousel-items"></div>
+        </div>
+
         <!-- Main Image Viewport Area -->
         <div class="viewport-area">
           <div class="canvas-wrapper" id="canvas-wrapper">
             <div class="empty-placeholder" id="placeholder">
               <span class="empty-icon">🔬</span>
-              <p style="font-size: 1.1rem; font-weight: 600; color: var(--text-main);">No Image Loaded</p>
-              <p style="font-size: 0.85rem;">Click "Browse File" or drag & drop a microscope scan to get started</p>
+              <p style="font-size: 1.1rem; font-weight: 600; color: var(--text-main);">No Images Loaded</p>
+              <p style="font-size: 0.85rem;">Click "Browse Images" or drag & drop 1 or more scans to get started</p>
             </div>
-            <img id="preview-image" class="preview-image" style="display: none;" alt="Microplastics Detection View">
+            <img id="preview-image" class="preview-image" style="display: none;" alt="Microplastics Overlay View">
           </div>
         </div>
 
@@ -173,7 +179,7 @@
         <div class="table-panel">
           <div class="table-bar">
             <div class="table-title">
-              <span>📋 Fragment Morphological Table</span>
+              <span>📋 Fragment Morphological & Color Measurements</span>
               <span style="font-size: 0.75rem; color: var(--text-muted);" id="table-count-label">(0 particles)</span>
             </div>
             <div class="table-actions">
@@ -186,6 +192,8 @@
               <thead>
                 <tr>
                   <th>ID</th>
+                  <th>Image</th>
+                  <th>Color Class</th>
                   <th>Score</th>
                   <th>Area (μm²)</th>
                   <th>Perimeter (μm)</th>
@@ -199,7 +207,7 @@
               </thead>
               <tbody id="table-body">
                 <tr>
-                  <td colspan="10" style="text-align: center; color: var(--text-dim); padding: 24px;">No fragments detected yet. Select an image and click "Run Particle Detection".</td>
+                  <td colspan="12" style="text-align: center; color: var(--text-dim); padding: 24px;">No fragments detected yet. Select images and click "Run Particle & Color Detection".</td>
                 </tr>
               </tbody>
             </table>

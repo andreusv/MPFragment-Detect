@@ -1,7 +1,8 @@
-// MPFragment Studio - Desktop GUI Logic Engine
+// MPFragment Studio - Desktop GUI Logic Engine (Multi-Image Batch + Color Characterization)
 
-let selectedFile = null;
-let lastResults = null;
+let selectedFiles = []; // Array of File objects
+let batchResults = null;
+let currentActiveIndex = 0;
 
 document.addEventListener('DOMContentLoaded', () => {
   initUI();
@@ -24,7 +25,6 @@ async function checkApiHealth() {
     console.warn("Health check error:", e);
   }
 }
-
 
 function initUI() {
   const fileInput = document.getElementById('file-input');
@@ -49,10 +49,9 @@ function initUI() {
   dropzone.addEventListener('click', () => fileInput.click());
   btnBrowse.addEventListener('click', () => fileInput.click());
 
-  // Native File Input change
   fileInput.addEventListener('change', (e) => {
     if (e.target.files && e.target.files.length > 0) {
-      handleFileSelected(e.target.files[0]);
+      handleFilesSelected(Array.from(e.target.files));
     }
   });
 
@@ -70,7 +69,7 @@ function initUI() {
     e.preventDefault();
     dropzone.classList.remove('dragover');
     if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
-      handleFileSelected(e.dataTransfer.files[0]);
+      handleFilesSelected(Array.from(e.dataTransfer.files));
     }
   });
 
@@ -89,34 +88,39 @@ function updateBadges() {
   document.getElementById('tile-val').textContent = document.getElementById('tile-size').value;
 }
 
-function handleFileSelected(file) {
-  selectedFile = file;
+function handleFilesSelected(files) {
+  selectedFiles = files;
   
-  // Show image info box & thumbnail
   const infoBox = document.getElementById('image-info-box');
   const thumb = document.getElementById('thumb-preview');
   const infoName = document.getElementById('info-filename');
   const infoDims = document.getElementById('info-dims');
 
-  infoName.textContent = file.name;
-  infoDims.textContent = `${(file.size / (1024 * 1024)).toFixed(2)} MB`;
+  if (files.length === 1) {
+    infoName.textContent = files[0].name;
+    infoDims.textContent = `${(files[0].size / (1024 * 1024)).toFixed(2)} MB`;
 
-  const reader = new FileReader();
-  reader.onload = (e) => {
-    thumb.src = e.target.result;
-    infoBox.style.display = 'flex';
-    displayMainImage(e.target.result);
-
-    // Read natural dimensions
-    const imgObj = new Image();
-    imgObj.onload = () => {
-      infoDims.textContent = `${imgObj.width} x ${imgObj.height} px`;
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      thumb.src = e.target.result;
+      infoBox.style.display = 'flex';
+      displayMainImage(e.target.result);
     };
-    imgObj.src = e.target.result;
-  };
-  reader.readAsDataURL(file);
+    reader.readAsDataURL(files[0]);
+  } else {
+    infoName.textContent = `${files.length} Images Selected`;
+    infoDims.textContent = `Batch size: ${files.length} scans`;
+    infoBox.style.display = 'flex';
 
-  document.getElementById('status-text').textContent = 'Image Loaded';
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      thumb.src = e.target.result;
+      displayMainImage(e.target.result);
+    };
+    reader.readAsDataURL(files[0]);
+  }
+
+  document.getElementById('status-text').textContent = `${files.length} Image(s) Loaded`;
 }
 
 function displayMainImage(src) {
@@ -129,8 +133,8 @@ function displayMainImage(src) {
 }
 
 async function runInference() {
-  if (!selectedFile) {
-    alert("Please select or drop an image file first.");
+  if (!selectedFiles || selectedFiles.length === 0) {
+    alert("Please select or drop 1 or more image files first.");
     return;
   }
 
@@ -138,8 +142,8 @@ async function runInference() {
   const statusText = document.getElementById('status-text');
 
   btnRun.disabled = true;
-  btnRun.innerHTML = `<div class="spinner"></div> Running ONNX Inference...`;
-  statusText.textContent = 'Processing Tiled ONNX...';
+  btnRun.innerHTML = `<div class="spinner"></div> Processing Batch...`;
+  statusText.textContent = `Processing ${selectedFiles.length} Scan(s)...`;
 
   const scoreThresh = parseFloat(document.getElementById('score-thresh').value);
   const wbfThresh = parseFloat(document.getElementById('wbf-thresh').value);
@@ -148,13 +152,15 @@ async function runInference() {
 
   try {
     const formData = new FormData();
-    formData.append('file', selectedFile);
+    selectedFiles.forEach(file => {
+      formData.append('files', file);
+    });
     formData.append('box_score_thresh', scoreThresh);
     formData.append('wbf_iou_thresh', wbfThresh);
     formData.append('tile_size', tileSize);
     if (scaleUm) formData.append('pixel_to_um', scaleUm);
 
-    const response = await fetch('/api/predict', {
+    const response = await fetch('/api/predict_batch', {
       method: 'POST',
       body: formData
     });
@@ -165,15 +171,11 @@ async function runInference() {
     }
 
     const data = await response.json();
-    lastResults = data;
+    batchResults = data;
+    currentActiveIndex = 0;
 
-    // Update Viewport with rendered overlay
-    if (data.visualization_base64) {
-      displayMainImage(`data:image/jpeg;base64,${data.visualization_base64}`);
-    }
-
-    updateDashboard(data);
-    statusText.textContent = 'Detection Complete';
+    updateUIWithBatchData(data);
+    statusText.textContent = 'Batch Detection Complete';
 
   } catch (err) {
     console.error("Inference Error:", err);
@@ -181,45 +183,75 @@ async function runInference() {
     statusText.textContent = 'Detection Failed';
   } finally {
     btnRun.disabled = false;
-    btnRun.innerHTML = `⚡ Run Particle Detection`;
+    btnRun.innerHTML = `⚡ Run Particle & Color Detection`;
   }
 }
 
-function updateDashboard(data) {
-  const frags = data.fragments || [];
+function updateUIWithBatchData(data) {
+  const summary = data.batch_summary || {};
+  const results = data.results || [];
 
-  // KPI Dashboard Cards
-  document.getElementById('kpi-count').textContent = frags.length;
+  if (results.length === 0) return;
 
-  let unit = "px²";
-  let totalArea = 0;
-  let meanDia = 0;
+  // Build Batch Carousel Selector if multiple images
+  const carousel = document.getElementById('batch-carousel');
+  const carouselItems = document.getElementById('carousel-items');
+  carouselItems.innerHTML = '';
 
-  if (frags.length > 0) {
-    if (frags[0].area_um2 !== undefined) {
-      unit = "μm²";
-      totalArea = frags.reduce((sum, f) => sum + f.area_um2, 0);
-      meanDia = frags.reduce((sum, f) => sum + f.eq_diameter_um, 0) / frags.length;
-      document.getElementById('kpi-scale').textContent = `${data.pixel_to_um.toFixed(4)} μm/px`;
-      document.getElementById('scale-badge').textContent = `${data.pixel_to_um.toFixed(3)} μm/px`;
-    } else {
-      totalArea = frags.reduce((sum, f) => sum + f.area_px, 0);
-      meanDia = frags.reduce((sum, f) => sum + f.eq_diameter_px, 0) / frags.length;
-      document.getElementById('kpi-scale').textContent = 'Pixels';
-      document.getElementById('scale-badge').textContent = 'Pixels';
-    }
+  if (results.length > 1) {
+    carousel.style.display = 'flex';
+    results.forEach((res, idx) => {
+      const item = document.createElement('div');
+      item.className = `carousel-item ${idx === currentActiveIndex ? 'active' : ''}`;
+      item.innerHTML = `<span>📄</span> ${res.image_name} (${res.fragments.length})`;
+      item.addEventListener('click', () => {
+        currentActiveIndex = idx;
+        document.querySelectorAll('.carousel-item').forEach((el, i) => {
+          el.classList.toggle('active', i === idx);
+        });
+        displaySingleImageResults(results[idx]);
+      });
+      carouselItems.appendChild(item);
+    });
+  } else {
+    carousel.style.display = 'none';
   }
 
-  document.getElementById('kpi-area').textContent = `${totalArea.toLocaleString(undefined, {maximumFractionDigits: 1})} ${unit}`;
-  document.getElementById('kpi-diameter').textContent = `${meanDia.toFixed(1)} ${unit === "μm²" ? "μm" : "px"}`;
-  document.getElementById('table-count-label').textContent = `(${frags.length} particles detected)`;
+  // Display initial active image
+  displaySingleImageResults(results[currentActiveIndex]);
 
-  // Table Body
+  // Aggregate Batch KPI Cards
+  document.getElementById('kpi-count').textContent = summary.total_fragments || 0;
+  document.getElementById('kpi-area').textContent = `${(summary.total_area || 0).toLocaleString(undefined, {maximumFractionDigits: 1})} μm²`;
+
+  // Compute dominant color overall
+  const colorDist = summary.color_distribution || {};
+  let topColor = "-";
+  let topCount = 0;
+  for (const [col, count] of Object.entries(colorDist)) {
+    if (count > topCount) {
+      topCount = count;
+      topColor = col;
+    }
+  }
+  document.getElementById('kpi-color').textContent = topColor;
+}
+
+function displaySingleImageResults(resData) {
+  if (resData.visualization_base64) {
+    displayMainImage(`data:image/jpeg;base64,${resData.visualization_base64}`);
+  }
+
+  const frags = resData.fragments || [];
+  document.getElementById('kpi-scale').textContent = resData.pixel_to_um ? `${resData.pixel_to_um.toFixed(3)} μm/px` : 'Auto';
+  document.getElementById('table-count-label').textContent = `(${frags.length} particles in ${resData.image_name})`;
+
+  // Populate Table Body
   const tbody = document.getElementById('table-body');
   tbody.innerHTML = '';
 
   if (frags.length === 0) {
-    tbody.innerHTML = `<tr><td colspan="10" style="text-align: center; color: var(--text-dim); padding: 24px;">No microplastic fragments detected at current thresholds.</td></tr>`;
+    tbody.innerHTML = `<tr><td colspan="12" style="text-align: center; color: var(--text-dim); padding: 24px;">No fragments detected in this scan.</td></tr>`;
     return;
   }
 
@@ -230,9 +262,18 @@ function updateDashboard(data) {
     const eqDia = f.eq_diameter_um !== undefined ? f.eq_diameter_um : f.eq_diameter_px;
     const majAx = f.major_axis_um !== undefined ? f.major_axis_um : f.major_axis_px;
     const minAx = f.minor_axis_um !== undefined ? f.minor_axis_um : f.minor_axis_px;
+    const hex = f.hex_code || "#808080";
+    const colorName = f.color_name || "Unknown";
 
     tr.innerHTML = `
       <td style="color: var(--primary-cyan); font-weight: 600;">#${f.id}</td>
+      <td style="font-size: 0.75rem; color: var(--text-muted);">${f.image_name}</td>
+      <td>
+        <span class="color-badge">
+          <span class="color-dot" style="background-color: ${hex};"></span>
+          ${colorName}
+        </span>
+      </td>
       <td>${(f.score * 100).toFixed(1)}%</td>
       <td>${area.toLocaleString(undefined, {maximumFractionDigits: 1})}</td>
       <td>${perim.toFixed(1)}</td>
@@ -246,7 +287,6 @@ function updateDashboard(data) {
     tbody.appendChild(tr);
   });
 
-  // Enable Export Buttons
   document.getElementById('btn-export-csv').disabled = false;
   document.getElementById('btn-export-json').disabled = false;
   const btnExportCsvTable = document.getElementById('btn-export-csv-table');
@@ -254,28 +294,37 @@ function updateDashboard(data) {
 }
 
 function exportCsv() {
-  if (!lastResults || !lastResults.fragments || lastResults.fragments.length === 0) return;
-  const frags = lastResults.fragments;
+  if (!batchResults || !batchResults.results || batchResults.results.length === 0) return;
 
-  const headers = Object.keys(frags[0]).join(',');
-  const rows = frags.map(f => Object.values(f).map(v => typeof v === 'object' ? `"${JSON.stringify(v)}"` : v).join(','));
+  // Flatten all fragments across all processed images in the batch
+  const allFrags = [];
+  batchResults.results.forEach(res => {
+    res.fragments.forEach(f => {
+      allFrags.push(f);
+    });
+  });
+
+  if (allFrags.length === 0) return;
+
+  const headers = Object.keys(allFrags[0]).join(',');
+  const rows = allFrags.map(f => Object.values(f).map(v => typeof v === 'object' ? `"${JSON.stringify(v)}"` : v).join(','));
   const csvContent = "data:text/csv;charset=utf-8," + [headers, ...rows].join('\n');
 
   const encodedUri = encodeURI(csvContent);
   const link = document.createElement("a");
   link.setAttribute("href", encodedUri);
-  link.setAttribute("download", "mp_fragment_measurements.csv");
+  link.setAttribute("download", "mp_fragment_batch_measurements.csv");
   document.body.appendChild(link);
   link.click();
   document.body.removeChild(link);
 }
 
 function exportJson() {
-  if (!lastResults) return;
-  const dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify(lastResults, null, 2));
+  if (!batchResults) return;
+  const dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify(batchResults, null, 2));
   const link = document.createElement("a");
   link.setAttribute("href", dataStr);
-  link.setAttribute("download", "mp_fragment_analysis.json");
+  link.setAttribute("download", "mp_fragment_batch_analysis.json");
   document.body.appendChild(link);
   link.click();
   document.body.removeChild(link);
