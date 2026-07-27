@@ -1,0 +1,214 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>MPFragment Studio - Microplastics Morphological Analysis</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <div id="app-container">
+    <!-- Header Navbar -->
+    <header>
+      <div class="brand">
+        <div class="brand-icon-wrapper">
+          <div class="brand-icon">MP</div>
+        </div>
+        <div class="brand-title">
+          <h1>MPFragment Studio</h1>
+          <p>Microplastics Mask R-CNN Detection & Quantification</p>
+        </div>
+      </div>
+      <div class="header-badges">
+        <div class="device-pill" id="device-info">ONNX Runtime / CPU</div>
+        <div class="status-pill">
+          <div class="status-dot"></div>
+          <span id="status-text">Engine Ready</span>
+        </div>
+      </div>
+    </header>
+
+    <!-- Main Workspace -->
+    <main>
+      <!-- Left Control Panel Sidebar -->
+      <aside class="sidebar">
+        <!-- Step 1: Input Selection Card -->
+        <div class="card">
+          <div class="card-title">
+            <span>🔬 1. Image Input</span>
+          </div>
+
+          <!-- Hidden Native File Input -->
+          <input type="file" id="file-input" accept="image/*" style="display: none;">
+
+          <!-- Interactive Drag & Drop Area -->
+          <div class="dropzone" id="dropzone">
+            <span class="dropzone-icon">📷</span>
+            <p><strong>Click to Select Scan</strong></p>
+            <p style="font-size: 0.75rem;">or drag & drop image here</p>
+          </div>
+
+          <!-- Active File Info Box -->
+          <div class="image-info-box" id="image-info-box" style="display: none;">
+            <img id="thumb-preview" class="thumb-preview" alt="Thumbnail">
+            <div class="image-meta">
+              <span class="image-name" id="info-filename">image.jpg</span>
+              <span class="image-dims" id="info-dims">3840 x 2160 px</span>
+            </div>
+          </div>
+
+          <button class="btn btn-secondary" id="btn-browse-file">
+            📁 Browse File
+          </button>
+        </div>
+
+        <!-- Step 2: Detection Settings Card -->
+        <div class="card">
+          <div class="card-title">
+            <span>⚙️ 2. Detection Parameters</span>
+          </div>
+
+          <div class="control-item">
+            <div class="control-header">
+              <span class="control-label">Confidence Score</span>
+              <span class="badge-val" id="score-val">0.60</span>
+            </div>
+            <input type="range" id="score-thresh" min="0.10" max="0.95" step="0.05" value="0.60">
+          </div>
+
+          <div class="control-item">
+            <div class="control-header">
+              <span class="control-label">WBF Fusion IoU</span>
+              <span class="badge-val" id="wbf-val">0.40</span>
+            </div>
+            <input type="range" id="wbf-thresh" min="0.10" max="0.90" step="0.05" value="0.40">
+          </div>
+
+          <div class="control-item">
+            <div class="control-header">
+              <span class="control-label">Tile Size (px)</span>
+              <span class="badge-val" id="tile-val">1024</span>
+            </div>
+            <input type="range" id="tile-size" min="512" max="2048" step="256" value="1024">
+          </div>
+
+          <div class="control-item">
+            <div class="control-header">
+              <span class="control-label">Scale Ratio (μm/px)</span>
+              <span class="badge-val" id="scale-badge">Auto</span>
+            </div>
+            <input type="number" class="text-input" id="scale-um" placeholder="Auto scalebar or enter um/px" step="0.0001">
+          </div>
+        </div>
+
+        <!-- Step 3: Action Execution Button -->
+        <button class="btn btn-primary" id="btn-run-inference">
+          ⚡ Run Particle Detection
+        </button>
+
+        <!-- Step 4: Export Card -->
+        <div class="card" style="margin-top: auto;">
+          <div class="card-title">
+            <span>📊 3. Export Data</span>
+          </div>
+          <button class="btn btn-secondary" id="btn-export-csv" disabled>
+            📥 Export CSV Spreadsheet
+          </button>
+          <button class="btn btn-secondary" id="btn-export-json" disabled>
+            📄 Export JSON Metadata
+          </button>
+        </div>
+      </aside>
+
+      <!-- Central Workspace -->
+      <section class="workspace">
+        <!-- KPI Analytics Cards -->
+        <div class="kpi-grid">
+          <div class="kpi-card">
+            <div class="kpi-icon">🧪</div>
+            <div class="kpi-content">
+              <span class="kpi-label">Detected Fragments</span>
+              <span class="kpi-value" id="kpi-count">0</span>
+            </div>
+          </div>
+
+          <div class="kpi-card">
+            <div class="kpi-icon">📐</div>
+            <div class="kpi-content">
+              <span class="kpi-label">Total Fragment Area</span>
+              <span class="kpi-value" id="kpi-area">0.0 μm²</span>
+            </div>
+          </div>
+
+          <div class="kpi-card">
+            <div class="kpi-icon">📏</div>
+            <div class="kpi-content">
+              <span class="kpi-label">Mean Eq. Diameter</span>
+              <span class="kpi-value" id="kpi-diameter">0.0 μm</span>
+            </div>
+          </div>
+
+          <div class="kpi-card">
+            <div class="kpi-icon">🔍</div>
+            <div class="kpi-content">
+              <span class="kpi-label">Scale Calibration</span>
+              <span class="kpi-value" id="kpi-scale">Auto</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- Main Image Viewport Area -->
+        <div class="viewport-area">
+          <div class="canvas-wrapper" id="canvas-wrapper">
+            <div class="empty-placeholder" id="placeholder">
+              <span class="empty-icon">🔬</span>
+              <p style="font-size: 1.1rem; font-weight: 600; color: var(--text-main);">No Image Loaded</p>
+              <p style="font-size: 0.85rem;">Click "Browse File" or drag & drop a microscope scan to get started</p>
+            </div>
+            <img id="preview-image" class="preview-image" style="display: none;" alt="Microplastics Detection View">
+          </div>
+        </div>
+
+        <!-- Bottom Table Drawer -->
+        <div class="table-panel">
+          <div class="table-bar">
+            <div class="table-title">
+              <span>📋 Fragment Morphological Table</span>
+              <span style="font-size: 0.75rem; color: var(--text-muted);" id="table-count-label">(0 particles)</span>
+            </div>
+            <div class="table-actions">
+              <button class="btn btn-secondary btn-xs" id="btn-export-csv-table" disabled>Export CSV</button>
+            </div>
+          </div>
+
+          <div class="table-scroll">
+            <table>
+              <thead>
+                <tr>
+                  <th>ID</th>
+                  <th>Score</th>
+                  <th>Area (μm²)</th>
+                  <th>Perimeter (μm)</th>
+                  <th>Eq. Dia (μm)</th>
+                  <th>Major Axis (μm)</th>
+                  <th>Minor Axis (μm)</th>
+                  <th>Aspect Ratio</th>
+                  <th>Circularity</th>
+                  <th>Solidity</th>
+                </tr>
+              </thead>
+              <tbody id="table-body">
+                <tr>
+                  <td colspan="10" style="text-align: center; color: var(--text-dim); padding: 24px;">No fragments detected yet. Select an image and click "Run Particle Detection".</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </section>
+    </main>
+  </div>
+
+  <script src="app.js"></script>
+</body>
+</html>

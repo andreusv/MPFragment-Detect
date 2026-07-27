@@ -1,0 +1,24 @@
+# Core Backend & Web Server
+fastapi>=0.100.0
+uvicorn>=0.20.0
+requests>=2.28.0
+
+# Desktop GUI Interface
+pywebview>=4.0.0
+
+# Computer Vision & Inference Engine
+onnxruntime>=1.15.0
+opencv-python>=4.7.0
+numpy>=1.22.0
+Pillow>=9.0.0
+scikit-image>=0.20.0
+ensemble-boxes>=1.0.9
+
+# Deep Learning Framework & Evaluation (optional for inference-only, required for evaluation)
+torch>=2.0.0
+torchvision>=0.15.0
+tqdm>=4.65.0
+PyYAML>=6.0
+
+# Packaging & Build Tooling
+pyinstaller>=5.10.0

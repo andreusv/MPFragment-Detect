@@ -1,0 +1,65 @@
+data:
+  train_images_dir: "/home/robotin/AllMPs/data/trainLongFormat/fragments/train/images"
+  val_images_dir: "/home/robotin/AllMPs/data/trainLongFormat/fragments/val/images"
+  train_ann: "/home/robotin/AllMPs/data/trainLongFormat/fragments/train/_annotations.coco.json"
+  val_ann: "/home/robotin/AllMPs/data/trainLongFormat/fragments/val/_annotations.coco.json"
+  num_classes: 2
+  batch_size: 8
+  num_workers: 4
+
+training:
+  epochs: 60
+  grad_clip_norm: 1.0
+  eval_interval: 2  # Evaluate every N epochs
+  mask_threshold: 0.5
+  iou_match_threshold: 0.5
+
+validation:
+  tile_size: 1024
+  overlap_pct: 0.15
+  mask_threshold: 0.5
+  iou_match_threshold: 0.5
+  val_batch_size: 1
+  downsample_factor: 3.0
+  num_visual_samples: 10
+
+logging:
+  project: "fragment-long-joint-maskrcnn-training"
+  group: "final-optimal-run"
+
+model_architecture:
+  num_classes: 2                  # Includes background (e.g., Background + Fragment)
+  
+  anchor_sizes: [[100], [139], [191], [331], [655]]
+  aspect_ratios: [[0.25, 0.5, 1.0, 2.0, 4.0]] # Will be replicated across all feature maps
+
+hyperparameters:
+  lr: 0.002                      # Replace with your optimal 'lr'
+  weight_decay: 0.00017            # Replace with your optimal 'weight_decay'
+  lr_backbone_multiplier: 0.073    # Replace with your optimal 'lr_backbone_multiplier'
+
+  scheduler_type: "multistep"        # "cosine", "multistep", or "plateau"
+  warmup_epochs: 9                # Replace with your optimal 'warmup_epochs'
+
+  box_nms_thresh: 0.35             # Replace with your optimal 'box_nms_thresh'
+  box_score_thresh: 0.065          # Replace with your optimal 'box_score_thresh'
+  box_detections_per_img: 10      # Replace with your optimal 'box_detections_per_img'
+
+  rpn_nms_thresh: 0.6             # Replace with your optimal 'rpn_nms_thresh'
+  rpn_score_thresh: 0.03          # Replace with your optimal 'rpn_score_thresh'
+  rpn_positive_fraction: 0.35      # Replace with your optimal 'rpn_positive_fraction'
+  rpn_batch_size_per_image: 128   # Replace with your optimal 'rpn_batch_size_per_image'
+
+  box_batch_size_per_image: 256   # Replace with your optimal 'box_batch_size_per_image'
+  box_positive_fraction: 0.35     # Replace with your optimal 'box_positive_fraction'
+  trainable_layers: 3             # Replace with your optimal 'trainable_layers'
+
+onnx_inference:
+  model_path: "final_maskrcnn_fragments_model.onnx"
+  tile_size: 1024
+  overlap_pct: 0.2
+  box_score_thresh: 0.6
+  wbf_iou_thresh: 0.4
+  mask_threshold: 0.5
+  output_dir: "outputs"
+
