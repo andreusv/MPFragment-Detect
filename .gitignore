@@ -61,8 +61,8 @@ Thumbs.db
 
 # Large Model Weights (>100MB file limit on standard GitHub repositories)
 # Note: final_maskrcnn_fragments_model.onnx is ~176 MB.
-# If using Git LFS, remove or comment out this line and track with 'git lfs track "*.onnx"'
-*.onnx
+# Tracked via Git LFS ('git lfs track "*.onnx"')
+# *.onnx
 # final_maskrcnn_fragments_model.onnx
 
 # Evaluation outputs, prediction dumps, and temporary logs
