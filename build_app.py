@@ -20,8 +20,8 @@ def build_executable():
         "--windowed",        # No terminal console window shown to end user
         "--noconfirm",
         "--clean",
-        "--add-data=static:static",
-        "--add-data=final_maskrcnn_fragments_model.onnx:.",
+        f"--add-data=static{os.pathsep}static",
+        f"--add-data=final_maskrcnn_fragments_model.onnx{os.pathsep}.",
         "app.py"
     ]
 
