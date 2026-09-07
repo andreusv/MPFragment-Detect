@@ -20,6 +20,16 @@ def build_executable():
         "--windowed",        # No terminal console window shown to end user
         "--noconfirm",
         "--clean",
+        "--hidden-import=multipart",
+        "--hidden-import=python_multipart",
+        "--hidden-import=uvicorn.logging",
+        "--hidden-import=uvicorn.loops",
+        "--hidden-import=uvicorn.loops.auto",
+        "--hidden-import=uvicorn.protocols",
+        "--hidden-import=uvicorn.protocols.http",
+        "--hidden-import=uvicorn.protocols.http.auto",
+        "--hidden-import=uvicorn.lifespans",
+        "--hidden-import=uvicorn.lifespans.on",
         f"--add-data=static{os.pathsep}static",
         f"--add-data=final_maskrcnn_fragments_model.onnx{os.pathsep}.",
         "app.py"
