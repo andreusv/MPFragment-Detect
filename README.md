@@ -1,11 +1,11 @@
-# MPFragDetect: Microplastics Detection & Morphological Analysis
+# MPFragment Detect: Microplastics Detection & Morphological Analysis
 
 [![Python 3.9+](https://img.shields.io/badge/python-3.9+-blue.svg)](https://www.python.org/downloads/)
 [![Framework](https://img.shields.io/badge/Backend-FastAPI-009688.svg)](https://fastapi.tiangolo.com/)
 [![GUI](https://img.shields.io/badge/GUI-PyWebView-orange.svg)](https://pywebview.flowrl.com/)
 [![Inference Engine](https://img.shields.io/badge/Inference-ONNX%20Runtime-blue.svg)](https://onnxruntime.ai/)
 
-**MPFragDetect** is an end-to-end computer vision software and inference engine designed for automated detection, segmentation, quantification, color classification, and morphological profiling of microplastic fragments from high-resolution optical microscope and scanner images.
+**MPFragment Detect** is an end-to-end computer vision software and inference engine designed for automated detection, segmentation, quantification, color classification, and morphological profiling of microplastic fragments from high-resolution optical microscope and scanner images.
 
 ---
 
