@@ -17,7 +17,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from mp_fragment_engine import MPFragmentEngine
 
-app = FastAPI(title="MPFragment Studio Backend")
+app = FastAPI(title="MPFragment Detect Backend")
 
 app.add_middleware(
     CORSMiddleware,
@@ -35,14 +35,21 @@ if not os.path.exists(STATIC_DIR):
 MODEL_PATH = os.path.join(BASE_DIR, "final_maskrcnn_fragments_model.onnx")
 engine = None
 
-def get_engine(box_score_thresh=0.6, wbf_iou_thresh=0.4, tile_size=1024):
+def get_engine(box_score_thresh=0.6, wbf_iou_thresh=0.4, tile_size=1024, overlap_pct=0.3):
     global engine
-    if engine is None or engine.box_score_thresh != box_score_thresh or engine.wbf_iou_thresh != wbf_iou_thresh or engine.tile_size != tile_size:
+    if (
+        engine is None
+        or engine.box_score_thresh != box_score_thresh
+        or engine.wbf_iou_thresh != wbf_iou_thresh
+        or engine.tile_size != tile_size
+        or getattr(engine, "overlap_pct", 0.3) != overlap_pct
+    ):
         engine = MPFragmentEngine(
             model_path=MODEL_PATH,
             box_score_thresh=box_score_thresh,
             wbf_iou_thresh=wbf_iou_thresh,
-            tile_size=tile_size
+            tile_size=tile_size,
+            overlap_pct=overlap_pct
         )
     return engine
 
@@ -57,13 +64,15 @@ async def api_predict(
     box_score_thresh: float = Form(0.6),
     wbf_iou_thresh: float = Form(0.4),
     tile_size: int = Form(1024),
+    overlap_pct: float = Form(0.3),
     pixel_to_um: float = Form(None)
 ):
     try:
         current_engine = get_engine(
             box_score_thresh=box_score_thresh,
             wbf_iou_thresh=wbf_iou_thresh,
-            tile_size=tile_size
+            tile_size=tile_size,
+            overlap_pct=overlap_pct
         )
 
         if file_path and os.path.exists(file_path):
@@ -92,6 +101,7 @@ async def api_predict(
             "fragments": pred_dict["fragments"],
             "pixel_to_um": pred_dict["pixel_to_um"],
             "scalebar_detected": pred_dict["scalebar_detected"],
+            "scalebar_info": pred_dict.get("scalebar_info"),
             "visualization_base64": vis_b64
         }
     except Exception as e:
@@ -105,13 +115,15 @@ async def api_predict_batch(
     box_score_thresh: float = Form(0.6),
     wbf_iou_thresh: float = Form(0.4),
     tile_size: int = Form(1024),
+    overlap_pct: float = Form(0.3),
     pixel_to_um: float = Form(None)
 ):
     try:
         current_engine = get_engine(
             box_score_thresh=box_score_thresh,
             wbf_iou_thresh=wbf_iou_thresh,
-            tile_size=tile_size
+            tile_size=tile_size,
+            overlap_pct=overlap_pct
         )
 
         batch_results = []
@@ -143,6 +155,7 @@ async def api_predict_batch(
                 "fragments": pred_dict["fragments"],
                 "pixel_to_um": pred_dict["pixel_to_um"],
                 "scalebar_detected": pred_dict["scalebar_detected"],
+                "scalebar_info": pred_dict.get("scalebar_info"),
                 "visualization_base64": vis_b64
             })
 
@@ -191,16 +204,16 @@ def main():
     server_thread = Thread(target=start_server, daemon=True)
     server_thread.start()
 
-    print("[MPFragment Studio] Waiting for backend server startup...")
+    print("[MPFragment Detect] Waiting for backend server startup...")
     if not wait_for_server():
-        print("[MPFragment Studio] Error: Backend server failed to start.")
+        print("[MPFragment Detect] Error: Backend server failed to start.")
         sys.exit(1)
-    print("[MPFragment Studio] Backend server ready on http://127.0.0.1:8000")
+    print("[MPFragment Detect] Backend server ready on http://127.0.0.1:8000")
 
     api = PyWebViewApi()
 
     webview.create_window(
-        title="MPFragment Studio - Microplastics Detection & Color Analysis",
+        title="MPFragment Detect - Microplastics Detection & Color Analysis",
         url="http://127.0.0.1:8000",
         width=1400,
         height=920,

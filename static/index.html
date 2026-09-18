@@ -1,28 +1,50 @@
 <!DOCTYPE html>
 <html lang="en">
+
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>MPFragment Studio - Microplastics Detection & Color Characterization</title>
+  <title>MPFragment Detect - Microplastic Fragments Detection & Characterization</title>
+  <link rel="icon" type="image/png" href="logo.png">
   <link rel="stylesheet" href="styles.css">
 </head>
+
 <body>
   <div id="app-container">
     <!-- Header Navbar -->
     <header>
       <div class="brand">
+        <button class="sidebar-toggle-btn is-open" id="btn-toggle-sidebar" title="Hide Controls"
+          aria-label="Toggle Control Panel" aria-expanded="true">
+          <span class="hamburger-bar bar-1"></span>
+          <span class="hamburger-bar bar-2"></span>
+          <span class="hamburger-bar bar-3"></span>
+        </button>
         <div class="brand-icon-wrapper">
-          <div class="brand-icon">MP</div>
+          <div class="brand-icon">
+            <img src="logo.png" alt="MPFragment Logo" class="brand-logo-img">
+          </div>
         </div>
         <div class="brand-title">
-          <h1>MPFragment Studio</h1>
+          <h1>MPFragment Detect</h1>
           <p>Microplastics Detection, Quantification & Color Characterization</p>
         </div>
       </div>
       <div class="header-badges">
-        <button class="sidebar-toggle-btn" id="btn-toggle-sidebar" title="Toggle Control Panel">
-          <span class="toggle-icon">◀</span>
-          <span class="toggle-label">Hide Controls</span>
+        <button class="overlay-toggle-btn" id="btn-toggle-overlay" title="Run inference first to toggle overlays"
+          aria-label="Toggle Detection Overlays" disabled>
+          <svg class="eye-svg eye-open" width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+            stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"></path>
+            <circle cx="12" cy="12" r="3"></circle>
+          </svg>
+          <svg class="eye-svg eye-closed" width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+            stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="display: none;">
+            <path
+              d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24">
+            </path>
+            <line x1="1" y1="1" x2="23" y2="23"></line>
+          </svg>
         </button>
         <div class="device-pill" id="device-info">ONNX Runtime / CPU</div>
         <div class="status-pill">
@@ -38,18 +60,19 @@
       <aside class="sidebar">
         <!-- Step 1: Input Selection Card -->
         <div class="card">
-          <div class="card-title">
-            <span>🔬 1. Image Input (Single or Batch)</span>
-          </div>
-
           <!-- Hidden Native File Input (multiple enabled) -->
           <input type="file" id="file-input" accept="image/*" multiple style="display: none;">
 
           <!-- Interactive Drag & Drop Area -->
           <div class="dropzone" id="dropzone">
-            <span class="dropzone-icon">📷</span>
-            <p><strong>Click to Select Images</strong></p>
-            <p style="font-size: 0.75rem;">Select 1 or multiple microscope scans</p>
+            <div class="dropzone-plus-icon">
+              <svg width="38" height="38" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"
+                stroke-linecap="round" stroke-linejoin="round">
+                <line x1="12" y1="5" x2="12" y2="19"></line>
+                <line x1="5" y1="12" x2="19" y2="12"></line>
+              </svg>
+            </div>
+            <span class="dropzone-text">Select Image/s</span>
           </div>
 
           <!-- Active File Info Box -->
@@ -60,16 +83,12 @@
               <span class="image-dims" id="info-dims">1 file selected</span>
             </div>
           </div>
-
-          <button class="btn btn-secondary" id="btn-browse-file">
-            📁 Browse Images (Multi)
-          </button>
         </div>
 
         <!-- Step 2: Detection Settings Card -->
         <div class="card">
           <div class="card-title">
-            <span>⚙️ 2. Detection & Color Settings</span>
+            <span>Settings</span>
           </div>
 
           <div class="control-item">
@@ -98,40 +117,43 @@
 
           <div class="control-item">
             <div class="control-header">
+              <span class="control-label">Tile Overlap</span>
+              <span class="badge-val" id="overlap-val">30%</span>
+            </div>
+            <input type="range" id="overlap-thresh" min="0.10" max="0.50" step="0.05" value="0.30">
+          </div>
+
+          <div class="control-item">
+            <div class="control-header">
               <span class="control-label">Scale Ratio (μm/px)</span>
               <span class="badge-val" id="scale-badge">Auto</span>
             </div>
-            <input type="number" class="text-input" id="scale-um" placeholder="Auto scalebar or enter um/px" step="0.0001">
+            <input type="number" class="text-input" id="scale-um" placeholder="Auto scalebar or enter um/px"
+              step="0.0001">
           </div>
         </div>
 
         <!-- Step 3: Action Execution Button -->
         <button class="btn btn-primary" id="btn-run-inference">
-          ⚡ Run Particle & Color Detection
+          Run Inference
         </button>
 
         <!-- Step 4: Export Card -->
-        <div class="card" style="margin-top: auto;">
+        <div class="card">
           <div class="card-title">
-            <span>📊 3. Export Data</span>
+            <span>Export Data</span>
           </div>
           <button class="btn btn-secondary" id="btn-export-csv" disabled>
-            📥 Export CSV Spreadsheet
+            Export CSV
           </button>
           <button class="btn btn-secondary" id="btn-export-json" disabled>
-            📄 Export JSON Metadata
+            Export JSON
           </button>
         </div>
       </aside>
 
       <!-- Central Workspace -->
       <section class="workspace">
-        <!-- Floating Edge Toggle Handle (visible when sidebar is collapsed) -->
-        <button class="sidebar-floating-toggle" id="btn-floating-toggle" title="Show Control Panel">
-          <span class="floating-icon">▶</span>
-          <span>Show Controls</span>
-        </button>
-
         <!-- KPI Analytics Cards -->
         <div class="kpi-grid">
           <div class="kpi-card">
@@ -185,8 +207,13 @@
           </div>
         </div>
 
+        <!-- Horizontal Resizer Divider Handle -->
+        <div class="panel-resizer" id="table-resizer" title="Drag to resize / Double-click to collapse or restore">
+          <div class="resizer-grip"></div>
+        </div>
+
         <!-- Bottom Table Drawer -->
-        <div class="table-panel">
+        <div class="table-panel" id="table-panel">
           <div class="table-bar">
             <div class="table-title">
               <span>📋 Fragment Morphological & Color Measurements</span>
@@ -194,6 +221,7 @@
             </div>
             <div class="table-actions">
               <button class="btn btn-secondary btn-xs" id="btn-export-csv-table" disabled>Export CSV</button>
+              <button class="btn btn-secondary btn-xs" id="btn-toggle-table" title="Collapse / Expand Table">↕</button>
             </div>
           </div>
 
@@ -217,7 +245,8 @@
               </thead>
               <tbody id="table-body">
                 <tr>
-                  <td colspan="12" style="text-align: center; color: var(--text-dim); padding: 24px;">No fragments detected yet. Select images and click "Run Particle & Color Detection".</td>
+                  <td colspan="12" style="text-align: center; color: var(--text-dim); padding: 24px;">No fragments
+                    detected yet. Select images and click "Run Particle & Color Detection".</td>
                 </tr>
               </tbody>
             </table>
@@ -229,4 +258,5 @@
 
   <script src="app.js"></script>
 </body>
+
 </html>

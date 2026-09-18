@@ -2,11 +2,24 @@ import os
 import json
 import csv
 import math
+import re
+import shutil
 import numpy as np
 import cv2
 from PIL import Image
 import onnxruntime as ort
 from skimage.measure import regionprops, label as label_np
+
+try:
+    import pytesseract
+    HAS_PYTESSERACT = True
+    if shutil.which("tesseract") is None:
+        for p in ["/opt/homebrew/bin/tesseract", "/usr/local/bin/tesseract", "/usr/bin/tesseract"]:
+            if os.path.exists(p):
+                pytesseract.pytesseract.tesseract_cmd = p
+                break
+except ImportError:
+    HAS_PYTESSERACT = False
 
 
 def _box_iou(a, b):
@@ -51,35 +64,223 @@ def cluster_detections(boxes, scores, labels, iou_thr):
             })
     return clusters
 
+class ScaleBarInfo:
+    """
+    Data structure containing detected scale bar metrics.
+    Supports unpacking like a 2-tuple (pixel_width, detected) for backwards compatibility.
+    """
+    def __init__(self, detected=False, pixel_width=None, scale_um=None, unit="um", pixel_to_um=None, raw_text="", region=None):
+        self.detected = bool(detected)
+        self.pixel_width = float(pixel_width) if pixel_width is not None else None
+        self.scale_um = float(scale_um) if scale_um is not None else None
+        self.unit = str(unit) if unit is not None else "um"
+        self.pixel_to_um = float(pixel_to_um) if pixel_to_um is not None else None
+        self.raw_text = str(raw_text) if raw_text is not None else ""
+        self.region = region
+
+    def __iter__(self):
+        yield self.pixel_width
+        yield self.detected
+
+    def to_dict(self):
+        return {
+            "detected": self.detected,
+            "pixel_width": round(self.pixel_width, 2) if self.pixel_width is not None else None,
+            "scale_um": round(self.scale_um, 2) if self.scale_um is not None else None,
+            "unit": self.unit,
+            "pixel_to_um": round(self.pixel_to_um, 5) if self.pixel_to_um is not None else None,
+            "raw_text": self.raw_text,
+            "region": self.region
+        }
+
+
 class ScaleBarDetector:
     """
-    Utility to detect scale bars in microscope/scanner image overlays
-    and convert pixels to micrometers (um).
+    Utility to detect microscope/scanner scale bars and text annotations (using OCR),
+    converting pixel measurements to micrometers (um) with high fidelity across noisy or light backgrounds.
     """
-    @staticmethod
-    def detect_scalebar(image_bgr):
+    STANDARD_SCALES = [10, 20, 25, 50, 100, 200, 250, 300, 400, 500, 750, 1000, 1500, 2000, 2500, 5000]
+
+    @classmethod
+    def parse_scale_text(cls, text):
         """
-        Attempts to detect scale bar line in top-right or bottom-right corner.
-        Returns: (pixel_width, detected_flag)
+        Parses OCR text string to extract numeric scale and unit.
+        Converts mm -> um (1 mm = 1000 um).
+        Snaps close readings to standard microscopy steps (e.g. 760 -> 750).
+        """
+        if not text:
+            return None, "um"
+
+        # Common OCR digit misreads: S/s->5, O/o->0, B->8, I/l/|->1
+        cleaned = text.replace("\n", " ").strip()
+        norm = (
+            cleaned.replace("S", "5")
+            .replace("s", "5")
+            .replace("O", "0")
+            .replace("o", "0")
+            .replace("B", "8")
+            .replace("I", "1")
+            .replace("l", "1")
+            .replace("|", "1")
+            .replace("_", "")
+        )
+
+        match = re.search(r"([0-9]+(?:\.[0-9]+)?)\s*([a-zA-Zµ]+)?", norm)
+        if not match:
+            return None, "um"
+
+        val = float(match.group(1))
+        unit_str = (match.group(2) or "").lower()
+
+        if "mm" in unit_str:
+            scale_um = val * 1000.0
+            unit = "mm"
+        else:
+            scale_um = val
+            unit = "um"
+
+        # Snap to nearest standard scale if within 4% tolerance (e.g. 760 -> 750)
+        for std in cls.STANDARD_SCALES:
+            if abs(scale_um - std) / std <= 0.04:
+                scale_um = float(std)
+                break
+
+        return scale_um, unit
+
+    @classmethod
+    def read_scale_text(cls, crop, line_y, x_min, x_max):
+        """
+        Extracts and OCRs the scale text directly above the horizontal bar.
+        """
+        if not HAS_PYTESSERACT:
+            return None, "um", ""
+
+        ch, cw = crop.shape[:2]
+        cx = (x_min + x_max) // 2
+        ty1 = max(0, line_y - 65)
+        ty2 = max(0, line_y - 2)
+        tx1 = max(0, cx - 110)
+        tx2 = min(cw, cx + 110)
+
+        t_crop = crop[ty1:ty2, tx1:tx2]
+        if t_crop.size == 0:
+            return None, "um", ""
+
+        # Upscale 3x using bicubic interpolation for clean character contours
+        up = cv2.resize(t_crop, (0, 0), fx=3.0, fy=3.0, interpolation=cv2.INTER_CUBIC)
+        gray = cv2.cvtColor(up, cv2.COLOR_BGR2GRAY)
+
+        # White top-hat morphology isolates bright characters regardless of background color/texture
+        kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (15, 15))
+        tophat = cv2.morphologyEx(gray, cv2.MORPH_TOPHAT, kernel)
+        _, b_tophat = cv2.threshold(tophat, 20, 255, cv2.THRESH_BINARY_INV)
+        # Add border padding required by Tesseract LSTM engine
+        padded = cv2.copyMakeBorder(b_tophat, 20, 20, 20, 20, cv2.BORDER_CONSTANT, value=255)
+
+        for psm in [8, 7, 6, 13]:
+            try:
+                txt = pytesseract.image_to_string(padded, config=f"--psm {psm}").strip()
+                if txt:
+                    scale_um, unit = cls.parse_scale_text(txt)
+                    if scale_um and scale_um > 0:
+                        return scale_um, unit, txt
+            except Exception:
+                pass
+
+        return None, "um", ""
+
+    @classmethod
+    def detect_scalebar(cls, image_bgr):
+        """
+        Attempts to detect scale bar line in image corners (top-right, bottom-right, top-left, bottom-left).
+        Applies morphological horizontal filtering to measure full bar length and OCR to read scale value.
+        Returns a ScaleBarInfo object (supports tuple unpacking (pixel_width, detected) for backward compatibility).
         """
         h, w = image_bgr.shape[:2]
 
         regions = [
             ("top_right", image_bgr[:int(h*0.25), int(w*0.75):]),
-            ("bottom_right", image_bgr[int(h*0.75):, int(w*0.75):])
+            ("bottom_right", image_bgr[int(h*0.75):, int(w*0.75):]),
+            ("top_left", image_bgr[:int(h*0.25), :int(w*0.25)]),
+            ("bottom_left", image_bgr[int(h*0.75):, :int(w*0.25)])
         ]
 
-        for name, crop in regions:
-            gray = cv2.cvtColor(crop, cv2.COLOR_BGR2GRAY)
-            _, thresh = cv2.threshold(gray, 220, 255, cv2.THRESH_BINARY)
-            contours, _ = cv2.findContours(thresh, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+        for r_name, crop in regions:
+            ch, cw = crop.shape[:2]
 
-            for c in contours:
-                x, y, cw, ch = cv2.boundingRect(c)
-                if cw > 80 and 5 < ch < 60:
-                    return float(cw), True
+            # Scale bar is a high-luminance overlay (RGB all > 190)
+            white = (crop[:, :, 0] > 190) & (crop[:, :, 1] > 190) & (crop[:, :, 2] > 190)
+            white_u8 = (white * 255).astype(np.uint8)
 
-        return None, False
+            best_bar = None
+            for kw in [80, 50]:
+                line_k = cv2.getStructuringElement(cv2.MORPH_RECT, (kw, 1))
+                h_lines = cv2.morphologyEx(white_u8, cv2.MORPH_OPEN, line_k)
+                close_k = cv2.getStructuringElement(cv2.MORPH_RECT, (30, 1))
+                h_lines = cv2.morphologyEx(h_lines, cv2.MORPH_CLOSE, close_k)
+
+                cnts, _ = cv2.findContours(h_lines, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+                candidates = []
+                for c in cnts:
+                    bx, by, bw, bh = cv2.boundingRect(c)
+                    if bw >= 100 and bh <= 60:
+                        candidates.append((bx, by, bw, bh))
+
+                if candidates:
+                    candidates.sort(key=lambda b: b[2], reverse=True)
+                    best_bar = candidates[0]
+                    break
+
+            if not best_bar:
+                continue
+
+            bx, by, bw, bh = best_bar
+
+            # Locate the exact horizontal line row
+            bar_sub = white_u8[by:by+bh, bx:bx+bw]
+            row_sums = np.sum(bar_sub > 0, axis=1)
+            line_y = by + int(np.argmax(row_sums))
+
+            # Vertical tick cap detection at ends (|____|)
+            tick_crop = white_u8[max(0, line_y-25):min(ch, line_y+25), max(0, bx-20):min(cw, bx+bw+20)]
+            v_kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (1, 8))
+            v_lines = cv2.morphologyEx(tick_crop, cv2.MORPH_OPEN, v_kernel)
+            cnts_v, _ = cv2.findContours(v_lines, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+
+            x_min = bx
+            x_max = bx + bw
+            offset_x = max(0, bx - 20)
+            for vc in cnts_v:
+                vx, vy, vw, vh = cv2.boundingRect(vc)
+                abs_vx = offset_x + vx
+                if abs(abs_vx - bx) <= 25:
+                    x_min = min(x_min, abs_vx)
+                if abs(abs_vx - (bx+bw)) <= 25:
+                    x_max = max(x_max, abs_vx + vw)
+
+            bar_px = float(x_max - x_min)
+            if bar_px <= 0:
+                continue
+
+            # OCR text recognition
+            scale_um, unit, raw_text = cls.read_scale_text(crop, line_y, x_min, x_max)
+            if not scale_um or scale_um <= 0:
+                scale_um = 500.0  # Fallback standard scale
+
+            pixel_to_um = float(scale_um / bar_px)
+
+            return ScaleBarInfo(
+                detected=True,
+                pixel_width=bar_px,
+                scale_um=scale_um,
+                unit=unit,
+                pixel_to_um=pixel_to_um,
+                raw_text=raw_text,
+                region=r_name
+            )
+
+        return ScaleBarInfo(detected=False)
+
 
 
 class ColorClassifier:
@@ -241,10 +442,13 @@ class MPFragmentEngine:
         h_orig, w_orig = image.shape[:2]
 
         scalebar_detected = False
+        scalebar_info = None
         if pixel_to_um is None:
-            detected_px, scalebar_detected = ScaleBarDetector.detect_scalebar(image)
-            if scalebar_detected and detected_px > 0:
-                pixel_to_um = 500.0 / detected_px
+            sb_res = ScaleBarDetector.detect_scalebar(image)
+            if sb_res.detected and sb_res.pixel_width and sb_res.pixel_width > 0:
+                pixel_to_um = sb_res.pixel_to_um
+                scalebar_detected = True
+                scalebar_info = sb_res
 
         slice_coords = self.get_slice_coordinates(w_orig, h_orig)
 
@@ -380,7 +584,8 @@ class MPFragmentEngine:
             "fused_labels": f_labels,
             "fused_masks": fused_masks,
             "pixel_to_um": pixel_to_um,
-            "scalebar_detected": scalebar_detected
+            "scalebar_detected": scalebar_detected,
+            "scalebar_info": scalebar_info.to_dict() if scalebar_info else None
         }
 
     def predict_batch(self, image_inputs, pixel_to_um=None):
@@ -485,40 +690,62 @@ class MPFragmentEngine:
 
         cv2.addWeighted(overlay, 0.5, image, 0.5, 0, image)
 
+        # Resolution-adaptive scaling for badges and lines
+        max_dim = max(w, h)
+        font_scale = max(0.75, min(2.5, max_dim / 1500.0))
+        text_thickness = max(2, int(font_scale * 2))
+        box_thickness = max(2, int(max_dim / 1200.0))
+
         for frag in fragments:
             box = [int(c) for c in frag["bbox"]]
             x1, y1, x2, y2 = box
 
-            cv2.rectangle(image, (x1, y1), (x2, y2), bbox_color, 2)
+            cv2.rectangle(image, (x1, y1), (x2, y2), bbox_color, box_thickness)
 
-            color_str = frag.get("color_name", "")
-            if "area_um2" in frag:
-                tag = f"#{frag['id']} MP [{color_str}] ({frag['score']:.2f}) | {frag['area_um2']:.0f} um²"
+            tag = str(frag['id'])
+            (tw, th), baseline = cv2.getTextSize(tag, cv2.FONT_HERSHEY_SIMPLEX, font_scale, text_thickness)
+            pad_x = int(7 * font_scale)
+            pad_y = int(5 * font_scale)
+
+            badge_h = th + 2 * pad_y + baseline
+            if y1 - badge_h >= 0:
+                bg_y1 = y1 - badge_h
+                bg_y2 = y1
             else:
-                tag = f"#{frag['id']} MP [{color_str}] ({frag['score']:.2f}) | {frag['area_px']:.0f} px²"
+                bg_y1 = y1
+                bg_y2 = y1 + badge_h
 
-            (tw, th), _ = cv2.getTextSize(tag, cv2.FONT_HERSHEY_SIMPLEX, 0.5, 1)
-            cv2.rectangle(image, (x1, max(0, y1 - 20)), (x1 + tw + 6, max(20, y1)), (0, 0, 0), -1)
-            cv2.putText(image, tag, (x1 + 3, max(14, y1 - 5)), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1, cv2.LINE_AA)
+            bg_x1 = max(0, x1)
+            bg_x2 = min(w, x1 + tw + 2 * pad_x)
 
-        # Summary Header Panel
-        cv2.rectangle(image, (20, 20), (460, 110), (0, 0, 0), -1)
-        cv2.rectangle(image, (20, 20), (460, 110), (0, 255, 127), 2)
+            # Dark pill background with glowing border
+            cv2.rectangle(image, (bg_x1, bg_y1), (bg_x2, bg_y2), (15, 23, 42), -1)
+            cv2.rectangle(image, (bg_x1, bg_y1), (bg_x2, bg_y2), bbox_color, max(1, text_thickness - 1))
 
-        total_frags = len(fragments)
-        if total_frags > 0 and "area_um2" in fragments[0]:
-            tot_area = sum(f["area_um2"] for f in fragments)
-            unit_str = "um²"
-        else:
-            tot_area = sum(f["area_px"] for f in fragments)
-            unit_str = "px²"
+            # Bold white fragment ID text
+            text_x = bg_x1 + pad_x
+            text_y = bg_y2 - pad_y - baseline
+            cv2.putText(
+                image,
+                tag,
+                (text_x, text_y),
+                cv2.FONT_HERSHEY_SIMPLEX,
+                font_scale,
+                (255, 255, 255),
+                text_thickness,
+                cv2.LINE_AA
+            )
 
-        cv2.putText(image, "MPFragment Studio - Color & Particle Analysis", (30, 45), cv2.FONT_HERSHEY_SIMPLEX, 0.55, (0, 255, 255), 2, cv2.LINE_AA)
-        cv2.putText(image, f"Detected Fragments: {total_frags}", (30, 70), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1, cv2.LINE_AA)
-        cv2.putText(image, f"Total Fragment Area: {tot_area:,.1f} {unit_str}", (30, 93), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1, cv2.LINE_AA)
 
+        sb_info = pred_dict.get("scalebar_info")
         if pixel_to_um is not None and pixel_to_um > 0:
-            scale_um = 500.0
+            if sb_info and sb_info.get("scale_um"):
+                scale_um = float(sb_info["scale_um"])
+                unit_label = sb_info.get("unit", "um")
+            else:
+                scale_um = 500.0
+                unit_label = "um"
+
             bar_px = int(scale_um / pixel_to_um)
             sb_x2 = w - 40
             sb_x1 = max(40, sb_x2 - bar_px)
@@ -526,7 +753,8 @@ class MPFragmentEngine:
 
             cv2.rectangle(image, (sb_x1 - 10, sb_y - 30), (sb_x2 + 10, sb_y + 15), (0, 0, 0), -1)
             cv2.line(image, (sb_x1, sb_y), (sb_x2, sb_y), (255, 255, 255), 4)
-            cv2.putText(image, f"{int(scale_um)} um", (sb_x1 + (bar_px // 4), sb_y - 8), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1, cv2.LINE_AA)
+            label_text = f"{int(scale_um)} {unit_label}" if scale_um >= 10 else f"{scale_um:.1f} {unit_label}"
+            cv2.putText(image, label_text, (sb_x1 + (bar_px // 4), sb_y - 8), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1, cv2.LINE_AA)
 
         if save_path:
             os.makedirs(os.path.dirname(save_path), exist_ok=True)

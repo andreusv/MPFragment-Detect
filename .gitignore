@@ -58,6 +58,7 @@ venv.bak/
 .Trashes
 ehthumbs.db
 Thumbs.db
+/logo.png
 
 # Large Model Weights (>100MB file limit on standard GitHub repositories)
 # Note: final_maskrcnn_fragments_model.onnx is ~176 MB.
@@ -70,3 +71,5 @@ outputs_evaluation/
 outputs_subset_eval/
 outputs_test/
 *.log
+
+benchmark_inference.py

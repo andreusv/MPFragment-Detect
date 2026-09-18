@@ -1,8 +1,8 @@
-// MPFragment Studio - Desktop GUI Logic Engine (Multi-Image Batch + Color Characterization)
-
 let selectedFiles = []; // Array of File objects
 let batchResults = null;
 let currentActiveIndex = 0;
+let currentRawImageUrls = [];
+let showOverlays = true;
 
 document.addEventListener('DOMContentLoaded', () => {
   initUI();
@@ -39,15 +39,17 @@ function initUI() {
   const scoreSlider = document.getElementById('score-thresh');
   const wbfSlider = document.getElementById('wbf-thresh');
   const tileSlider = document.getElementById('tile-size');
+  const overlapSlider = document.getElementById('overlap-thresh');
 
   scoreSlider.addEventListener('input', updateBadges);
   wbfSlider.addEventListener('input', updateBadges);
   tileSlider.addEventListener('input', updateBadges);
+  if (overlapSlider) overlapSlider.addEventListener('input', updateBadges);
   updateBadges();
 
   // Click triggers for File Selection
   dropzone.addEventListener('click', () => fileInput.click());
-  btnBrowse.addEventListener('click', () => fileInput.click());
+  if (btnBrowse) btnBrowse.addEventListener('click', () => fileInput.click());
 
   fileInput.addEventListener('change', (e) => {
     if (e.target.files && e.target.files.length > 0) {
@@ -83,32 +85,196 @@ function initUI() {
 
   // Sidebar Sliding Toggle
   const btnToggleSidebar = document.getElementById('btn-toggle-sidebar');
-  const btnFloatingToggle = document.getElementById('btn-floating-toggle');
   const sidebar = document.querySelector('.sidebar');
+
+  function updateToggleState(isOpen) {
+    if (btnToggleSidebar) {
+      btnToggleSidebar.classList.toggle('is-open', isOpen);
+      btnToggleSidebar.setAttribute('aria-expanded', isOpen);
+      btnToggleSidebar.setAttribute('title', isOpen ? 'Hide Controls' : 'Show Controls');
+    }
+  }
 
   function toggleSidebar() {
     if (!sidebar) return;
     const isCollapsed = sidebar.classList.toggle('collapsed');
-    if (btnToggleSidebar) {
-      const icon = btnToggleSidebar.querySelector('.toggle-icon');
-      const label = btnToggleSidebar.querySelector('.toggle-label');
-      if (icon) icon.textContent = isCollapsed ? '▶' : '◀';
-      if (label) label.textContent = isCollapsed ? 'Show Controls' : 'Hide Controls';
-    }
+    updateToggleState(!isCollapsed);
   }
 
   if (btnToggleSidebar) btnToggleSidebar.addEventListener('click', toggleSidebar);
-  if (btnFloatingToggle) btnFloatingToggle.addEventListener('click', toggleSidebar);
+
+  // Overlay Toggle Button (Eye)
+  const btnToggleOverlay = document.getElementById('btn-toggle-overlay');
+  if (btnToggleOverlay) {
+    btnToggleOverlay.addEventListener('click', () => {
+      if (!batchResults || !batchResults.results || batchResults.results.length === 0) return;
+      showOverlays = !showOverlays;
+      updateOverlayButtonUI();
+      displaySingleImageResults(batchResults.results[currentActiveIndex]);
+    });
+  }
+
+  // Initialize Slidable Table Panel
+  initTableResizer();
+}
+
+function initTableResizer() {
+  const resizer = document.getElementById('table-resizer');
+  const tablePanel = document.getElementById('table-panel');
+  const btnToggleTable = document.getElementById('btn-toggle-table');
+  const workspace = document.querySelector('.workspace');
+  if (!resizer || !tablePanel || !workspace) return;
+
+  const DEFAULT_HEIGHT = 240;
+  const MIN_HEIGHT = 44; // Keeps table header bar visible
+  let lastExpandedHeight = DEFAULT_HEIGHT;
+
+  // Restore saved height from local storage
+  try {
+    const saved = localStorage.getItem('mp_table_height');
+    if (saved) {
+      const parsed = parseInt(saved, 10);
+      if (!isNaN(parsed) && parsed >= MIN_HEIGHT && parsed <= window.innerHeight * 0.8) {
+        tablePanel.style.height = `${parsed}px`;
+        if (parsed > 60) lastExpandedHeight = parsed;
+      }
+    }
+  } catch (_) {}
+
+  let isDragging = false;
+  let startY = 0;
+  let startHeight = 0;
+
+  function updateToggleBtn() {
+    if (!btnToggleTable) return;
+    const currentH = tablePanel.getBoundingClientRect().height;
+    if (currentH <= 60) {
+      btnToggleTable.textContent = '▲';
+      btnToggleTable.setAttribute('title', 'Expand Table');
+    } else {
+      btnToggleTable.textContent = '▼';
+      btnToggleTable.setAttribute('title', 'Collapse Table (Maximize Viewport)');
+    }
+  }
+
+  updateToggleBtn();
+
+  resizer.addEventListener('pointerdown', (e) => {
+    isDragging = true;
+    startY = e.clientY;
+    startHeight = tablePanel.getBoundingClientRect().height;
+    resizer.classList.add('active');
+    document.body.classList.add('is-resizing');
+    tablePanel.style.transition = 'none';
+    resizer.setPointerCapture(e.pointerId);
+  });
+
+  resizer.addEventListener('pointermove', (e) => {
+    if (!isDragging) return;
+    const dy = startY - e.clientY;
+    const workspaceHeight = workspace.clientHeight;
+    const maxHeight = Math.max(MIN_HEIGHT, workspaceHeight - 100);
+    const newHeight = Math.min(Math.max(startHeight + dy, MIN_HEIGHT), maxHeight);
+    tablePanel.style.height = `${Math.round(newHeight)}px`;
+    updateToggleBtn();
+  });
+
+  function endDrag(e) {
+    if (!isDragging) return;
+    isDragging = false;
+    resizer.classList.remove('active');
+    document.body.classList.remove('is-resizing');
+    tablePanel.style.transition = '';
+    const finalH = Math.round(tablePanel.getBoundingClientRect().height);
+    if (finalH > 60) {
+      lastExpandedHeight = finalH;
+    }
+    try {
+      localStorage.setItem('mp_table_height', finalH);
+      resizer.releasePointerCapture(e.pointerId);
+    } catch (_) {}
+    updateToggleBtn();
+  }
+
+  resizer.addEventListener('pointerup', endDrag);
+  resizer.addEventListener('pointercancel', endDrag);
+
+  function toggleTableHeight() {
+    tablePanel.style.transition = 'height 0.28s cubic-bezier(0.4, 0, 0.2, 1)';
+    const currentH = tablePanel.getBoundingClientRect().height;
+    if (currentH <= 60) {
+      // Restore / Expand
+      const restoreH = lastExpandedHeight > 60 ? lastExpandedHeight : DEFAULT_HEIGHT;
+      tablePanel.style.height = `${restoreH}px`;
+      try { localStorage.setItem('mp_table_height', restoreH); } catch (_) {}
+    } else {
+      // Collapse
+      lastExpandedHeight = currentH;
+      tablePanel.style.height = `${MIN_HEIGHT}px`;
+      try { localStorage.setItem('mp_table_height', MIN_HEIGHT); } catch (_) {}
+    }
+    setTimeout(() => {
+      tablePanel.style.transition = '';
+      updateToggleBtn();
+    }, 300);
+  }
+
+  resizer.addEventListener('dblclick', toggleTableHeight);
+  if (btnToggleTable) btnToggleTable.addEventListener('click', toggleTableHeight);
 }
 
 function updateBadges() {
   document.getElementById('score-val').textContent = parseFloat(document.getElementById('score-thresh').value).toFixed(2);
   document.getElementById('wbf-val').textContent = parseFloat(document.getElementById('wbf-thresh').value).toFixed(2);
   document.getElementById('tile-val').textContent = document.getElementById('tile-size').value;
+  const overlapEl = document.getElementById('overlap-thresh');
+  if (overlapEl) {
+    document.getElementById('overlap-val').textContent = `${Math.round(parseFloat(overlapEl.value) * 100)}%`;
+  }
+}
+
+function updateOverlayButtonUI() {
+  const btn = document.getElementById('btn-toggle-overlay');
+  if (!btn) return;
+  const eyeOpen = btn.querySelector('.eye-open');
+  const eyeClosed = btn.querySelector('.eye-closed');
+  if (showOverlays) {
+    btn.classList.add('is-active');
+    btn.classList.remove('is-hidden-mode');
+    btn.title = "Hide Detection Overlays (Show Raw Image)";
+    if (eyeOpen) eyeOpen.style.display = 'block';
+    if (eyeClosed) eyeClosed.style.display = 'none';
+  } else {
+    btn.classList.remove('is-active');
+    btn.classList.add('is-hidden-mode');
+    btn.title = "Show Detection Overlays";
+    if (eyeOpen) eyeOpen.style.display = 'none';
+    if (eyeClosed) eyeClosed.style.display = 'block';
+  }
+}
+
+function updateOverlayToggleState(enabled) {
+  const btn = document.getElementById('btn-toggle-overlay');
+  if (!btn) return;
+  btn.disabled = !enabled;
+  if (enabled) {
+    updateOverlayButtonUI();
+  } else {
+    btn.classList.remove('is-active', 'is-hidden-mode');
+    btn.title = "Run inference first to toggle overlays";
+    const eyeOpen = btn.querySelector('.eye-open');
+    const eyeClosed = btn.querySelector('.eye-closed');
+    if (eyeOpen) eyeOpen.style.display = 'block';
+    if (eyeClosed) eyeClosed.style.display = 'none';
+  }
 }
 
 function handleFilesSelected(files) {
   selectedFiles = files;
+  currentRawImageUrls.forEach(url => URL.revokeObjectURL(url));
+  currentRawImageUrls = files.map(f => URL.createObjectURL(f));
+  batchResults = null;
+  updateOverlayToggleState(false);
   
   const infoBox = document.getElementById('image-info-box');
   const thumb = document.getElementById('thumb-preview');
@@ -161,12 +327,13 @@ async function runInference() {
   const statusText = document.getElementById('status-text');
 
   btnRun.disabled = true;
-  btnRun.innerHTML = `<div class="spinner"></div> Processing Batch...`;
+  btnRun.innerHTML = `<div class="spinner"></div> Running Inference...`;
   statusText.textContent = `Processing ${selectedFiles.length} Scan(s)...`;
 
   const scoreThresh = parseFloat(document.getElementById('score-thresh').value);
   const wbfThresh = parseFloat(document.getElementById('wbf-thresh').value);
   const tileSize = parseInt(document.getElementById('tile-size').value);
+  const overlapThresh = document.getElementById('overlap-thresh') ? parseFloat(document.getElementById('overlap-thresh').value) : 0.3;
   const scaleUm = document.getElementById('scale-um').value ? parseFloat(document.getElementById('scale-um').value) : null;
 
   try {
@@ -177,6 +344,7 @@ async function runInference() {
     formData.append('box_score_thresh', scoreThresh);
     formData.append('wbf_iou_thresh', wbfThresh);
     formData.append('tile_size', tileSize);
+    formData.append('overlap_pct', overlapThresh);
     if (scaleUm) formData.append('pixel_to_um', scaleUm);
 
     const response = await fetch('/api/predict_batch', {
@@ -202,7 +370,7 @@ async function runInference() {
     statusText.textContent = 'Detection Failed';
   } finally {
     btnRun.disabled = false;
-    btnRun.innerHTML = `⚡ Run Particle & Color Detection`;
+    btnRun.innerHTML = `Run Inference`;
   }
 }
 
@@ -237,6 +405,8 @@ function updateUIWithBatchData(data) {
   }
 
   // Display initial active image
+  showOverlays = true;
+  updateOverlayToggleState(true);
   displaySingleImageResults(results[currentActiveIndex]);
 
   // Aggregate Batch KPI Cards
@@ -257,12 +427,24 @@ function updateUIWithBatchData(data) {
 }
 
 function displaySingleImageResults(resData) {
-  if (resData.visualization_base64) {
+  if (showOverlays && resData.visualization_base64) {
+    displayMainImage(`data:image/jpeg;base64,${resData.visualization_base64}`);
+  } else if (currentRawImageUrls[currentActiveIndex]) {
+    displayMainImage(currentRawImageUrls[currentActiveIndex]);
+  } else if (resData.visualization_base64) {
     displayMainImage(`data:image/jpeg;base64,${resData.visualization_base64}`);
   }
 
   const frags = resData.fragments || [];
-  document.getElementById('kpi-scale').textContent = resData.pixel_to_um ? `${resData.pixel_to_um.toFixed(3)} μm/px` : 'Auto';
+  if (resData.scalebar_info && resData.scalebar_info.detected) {
+    const sb = resData.scalebar_info;
+    const valText = sb.scale_um >= 1000 && sb.unit === 'mm' ? `${sb.scale_um / 1000} mm` : `${sb.scale_um} μm`;
+    document.getElementById('kpi-scale').textContent = `${valText} (${Math.round(sb.pixel_width)}px) → ${resData.pixel_to_um.toFixed(3)} μm/px`;
+  } else if (resData.pixel_to_um) {
+    document.getElementById('kpi-scale').textContent = `${resData.pixel_to_um.toFixed(3)} μm/px`;
+  } else {
+    document.getElementById('kpi-scale').textContent = 'Auto';
+  }
   document.getElementById('table-count-label').textContent = `(${frags.length} particles in ${resData.image_name})`;
 
   // Populate Table Body
@@ -285,7 +467,7 @@ function displaySingleImageResults(resData) {
     const colorName = f.color_name || "Unknown";
 
     tr.innerHTML = `
-      <td style="color: var(--primary-cyan); font-weight: 600;">#${f.id}</td>
+      <td style="color: var(--primary-cyan); font-weight: 600;">${f.id}</td>
       <td style="font-size: 0.75rem; color: var(--text-muted);">${f.image_name}</td>
       <td>
         <span class="color-badge">
