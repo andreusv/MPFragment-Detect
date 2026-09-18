@@ -22,7 +22,7 @@
 - **Automatic Scale Bar Detection**: Built-in computer vision module (`ScaleBarDetector`) that scans image corners for microscope scale bar markings to auto-calibrate the pixel-to-micrometer ratio.
 - **Modern Desktop GUI**: Built using PyWebView and a responsive web dashboard (FastAPI backend + Vanilla JS/CSS frontend) offering visualization overlays, interactive data tables with color dot badges, and CSV/JSON exports.
 - **Standalone Packaging**: Includes PyInstaller build automation (`build_app.py`) to create standalone executable packages (`.app` on macOS / `.exe` on Windows).
-- **Benchmarking & Optimization Tools**: Includes evaluation scripts (`onnx_inference.py` and `WBF_EVO.py`) for COCO metric calculation, confusion matrix analysis, and WBF threshold tuning.
+- **Benchmarking & Evaluation Pipeline**: Includes batch inference pipeline (`onnx_inference.py`) for running high-throughput evaluations on image collections and generating visual overlays, JSON metrics, and CSV reports.
 
 ---
 
@@ -34,17 +34,16 @@ MPFragDetect/
 ├── mp_fragment_engine.py              # Core Engine (Sliced Inference, WBF, Color Classifier & Scale Calibration)
 ├── build_app.py                       # PyInstaller executable builder script
 ├── MPFragment.spec                    # PyInstaller build spec file
-├── onnx_inference.py                  # Standalone model evaluation & COCO metrics pipeline
-├── WBF_EVO.py                         # Hyperparameter tuning script for WBF thresholds
-├── fragment-Config.yaml               # Model & dataset configuration file
+├── onnx_inference.py                  # Standalone batch inference & evaluation pipeline
+├── fragment-Config.yaml               # Model & inference configuration file
 ├── requirements.txt                   # Dependency requirements file
 ├── final_maskrcnn_fragments_model.onnx# Trained Mask R-CNN ONNX model weights (176 MB)
 ├── static/                            # Frontend UI assets (HTML5, CSS3, JS)
 │   ├── index.html
 │   ├── styles.css
+│   ├── logo.png
 │   └── app.js
-├── test/                              # Sample evaluation dataset & COCO annotations
-│   ├── _annotations.coco.json
+├── test/                              # Sample test images for quick inference testing
 │   └── images/
 └── .gitignore                         # Git exclusion rules
 ```
@@ -108,21 +107,15 @@ To package the application into a standalone executable (`dist/MPFragment.app` o
 python build_app.py
 ```
 
-### Model Evaluation & COCO Metrics
+### Batch Inference & Image Evaluation
 
-To evaluate model performance against COCO-annotated test datasets:
-
-```bash
-python onnx_inference.py --config fragment-Config.yaml --coco-json test/_annotations.coco.json --img-dir test/images
-```
-
-### Optimize WBF Hyperparameters
-
-To tune Weighted Boxes Fusion IoU and confidence score thresholds:
+To run inference across the sample test images (or a custom directory of images):
 
 ```bash
-python WBF_EVO.py --config fragment-Config.yaml
+python onnx_inference.py --config fragment-Config.yaml --image_dir test/images
 ```
+
+*(Optional: If evaluating against ground-truth COCO annotations, provide `--coco_ann /path/to/annotations.coco.json` to compute confusion matrix and detection metrics).*
 
 ---
 
